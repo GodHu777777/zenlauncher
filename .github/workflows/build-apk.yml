@@ -1,0 +1,48 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Release APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.x'
+          channel: 'stable'
+          cache: true
+
+      - name: Initialize Android Scaffolding & Wrapper
+        run: |
+          mkdir -p /tmp/backup_src
+          cp -r android/app/src/* /tmp/backup_src/
+          flutter create . --platforms=android --org=com.zenlauncher
+          cp -r /tmp/backup_src/* android/app/src/
+
+      - name: Get Dependencies
+        run: flutter pub get
+
+      - name: Build Release APK
+        run: flutter build apk --release --no-tree-shake-icons
+
+      - name: Upload Release APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZenLauncher-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 14
