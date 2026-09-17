@@ -127,27 +127,80 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private val REQUEST_ROLE_HOME = 1001
+
     private fun openDefaultLauncherSettings() {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        // 1. Try Android Q+ RoleManager with startActivityForResult
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
                 val roleManager = getSystemService(Context.ROLE_SERVICE) as? RoleManager
                 if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_HOME)) {
                     val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_HOME)
-                    startActivity(intent)
+                    startActivityForResult(intent, REQUEST_ROLE_HOME)
                     return
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-            // Fallback for earlier versions or if RoleManager is not available
+        }
+
+        // 2. Try MIUI / HyperOS Preferred App Intent
+        try {
+            val miuiIntent = Intent("miui.intent.action.PREFERRED_APP").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            if (packageManager.resolveActivity(miuiIntent, 0) != null) {
+                startActivity(miuiIntent)
+                return
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 3. Try ACTION_MANAGE_DEFAULT_APPS_SETTINGS (Standard Android 7+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(intent)
+                return
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // 4. Try ACTION_HOME_SETTINGS
+        try {
             val intent = Intent(Settings.ACTION_HOME_SETTINGS).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             startActivity(intent)
+            return
         } catch (e: Exception) {
-            // General settings fallback
+            e.printStackTrace()
+        }
+
+        // 5. Try Application Details Settings
+        try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:$packageName")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            return
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 6. Fallback to General Settings
+        try {
             val intent = Intent(Settings.ACTION_SETTINGS).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             startActivity(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 

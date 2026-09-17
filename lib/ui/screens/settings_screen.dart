@@ -181,6 +181,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  void _showDefaultLauncherHelpDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('如何设为默认桌面'),
+        content: const SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '💡 国产手机（小米/HyperOS、华为/鸿蒙、vivo、OPPO 等）系统对桌面权限有严格的安全保护限制，如果未自动弹出系统切换框，可通过以下方式设置：',
+                style: TextStyle(fontSize: 13, height: 1.5),
+              ),
+              SizedBox(height: 14),
+              Text(
+                '【最快方式】：',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+              Text(
+                '直接按手机底部的 Home 键（或从屏幕底部上滑返回桌面），系统通常会直接弹出「选择主屏幕应用」对话框，选中 ZenLauncher 并点击「始终」。',
+                style: TextStyle(fontSize: 13, height: 1.4),
+              ),
+              SizedBox(height: 14),
+              Text(
+                '【各机型手动设置路径】：',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+              Text(
+                '• 小米 / Redmi：设置 → 应用设置 → 应用管理 → 右上角三个点「默认应用设置」 → 桌面 → 选择 ZenLauncher\n'
+                '• 华为 / 荣耀：设置 → 应用和服务 → 默认应用 → 桌面 → 选择 ZenLauncher\n'
+                '• vivo / iQOO：设置 → 应用与权限 → 默认应用设置 → 桌面 → 选择 ZenLauncher\n'
+                '• OPPO / 一加：设置 → 应用 → 默认应用 → 桌面 → 选择 ZenLauncher',
+                style: TextStyle(fontSize: 12.5, height: 1.6),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('我知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -228,6 +276,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 OutlinedButton(
                   onPressed: () {
                     AppLauncherService.openDefaultLauncherSettings();
+                    _showDefaultLauncherHelpDialog();
                   },
                   child: const Text('去系统设置中更改默认桌面'),
                 ),
