@@ -2,13 +2,19 @@ package com.zenlauncher.app.manager
 
 import android.app.Activity
 import android.app.role.RoleManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.LauncherActivityInfo
+import android.content.pm.LauncherApps
 import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.net.Uri
 import android.os.Build
+import android.os.Process
+import android.os.UserHandle
+import android.os.UserManager
 import android.provider.Settings
 import com.zenlauncher.app.model.AppInfo
 import com.zenlauncher.app.util.PinyinSearchEngine
@@ -71,7 +77,7 @@ object AppManager {
                         0L
                     }
 
-                    val activities = try {
+                    val activities: List<LauncherActivityInfo> = try {
                         launcherApps.getActivityList(null, user)
                     } catch (e: Exception) {
                         e.printStackTrace()
@@ -84,8 +90,8 @@ object AppManager {
 
                         val rawLabel = info.label?.toString()?.trim() ?: pkg
                         val cleanLabel = if (isClone) {
-                            rawLabel.replace(Regex("[\\(（]?(分身|双开|克隆|Work|工作)[\\)）]?$"), "").trim()
-                                .ifEmpty { rawLabel }
+                            val stripped = rawLabel.replace(Regex("[\\(（]?(分身|双开|克隆|Work|工作)[\\)）]?$"), "").trim()
+                            if (stripped.isEmpty()) rawLabel else stripped
                         } else {
                             rawLabel
                         }
