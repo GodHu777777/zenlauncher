@@ -35,12 +35,12 @@ class PrefManager(context: Context) {
         prefs.edit().putStringSet(KEY_FAVORITES, set).apply()
     }
 
-    fun toggleFavorite(packageName: String) {
+    fun toggleFavorite(id: String) {
         val current = getFavorites().toMutableSet()
-        if (current.contains(packageName)) {
-            current.remove(packageName)
+        if (current.contains(id)) {
+            current.remove(id)
         } else {
-            current.add(packageName)
+            current.add(id)
         }
         saveFavorites(current)
     }
@@ -53,12 +53,12 @@ class PrefManager(context: Context) {
         prefs.edit().putStringSet(KEY_HIDDEN, set).apply()
     }
 
-    fun toggleHidden(packageName: String) {
+    fun toggleHidden(id: String) {
         val current = getHiddenApps().toMutableSet()
-        if (current.contains(packageName)) {
-            current.remove(packageName)
+        if (current.contains(id)) {
+            current.remove(id)
         } else {
-            current.add(packageName)
+            current.add(id)
         }
         saveHiddenApps(current)
     }
@@ -81,26 +81,26 @@ class PrefManager(context: Context) {
         prefs.edit().putStringSet(KEY_DOPAMINE, set).apply()
     }
 
-    fun toggleDopamine(packageName: String) {
+    fun toggleDopamine(id: String) {
         val current = getDopamineApps().toMutableSet()
-        if (current.contains(packageName)) {
-            current.remove(packageName)
+        if (current.contains(id)) {
+            current.remove(id)
         } else {
-            current.add(packageName)
+            current.add(id)
         }
         saveDopamineApps(current)
     }
 
-    fun getAlias(packageName: String): String? {
-        return prefs.getString(PREFIX_ALIAS + packageName, null)
+    fun getAlias(id: String): String? {
+        return prefs.getString(PREFIX_ALIAS + id, null)
     }
 
-    fun setAlias(packageName: String, alias: String?) {
+    fun setAlias(id: String, alias: String?) {
         val editor = prefs.edit()
         if (alias.isNullOrBlank()) {
-            editor.remove(PREFIX_ALIAS + packageName)
+            editor.remove(PREFIX_ALIAS + id)
         } else {
-            editor.putString(PREFIX_ALIAS + packageName, alias.trim())
+            editor.putString(PREFIX_ALIAS + id, alias.trim())
         }
         editor.apply()
     }

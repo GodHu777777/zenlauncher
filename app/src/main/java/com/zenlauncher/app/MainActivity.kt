@@ -1,7 +1,10 @@
 package com.zenlauncher.app
 
+import android.content.Context
 import android.content.Intent
+import android.content.pm.LauncherApps
 import android.os.Bundle
+import android.os.UserHandle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
@@ -36,6 +39,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var favoritesAdapter: AppAdapter
     private lateinit var searchAdapter: AppAdapter
+    private var launcherAppsCallback: LauncherApps.Callback? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,6 +51,7 @@ class MainActivity : AppCompatActivity() {
 
         setupAdapters()
         setupListeners()
+        registerLauncherAppsCallback()
     }
 
     override fun onResume() {
@@ -132,13 +137,43 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun registerLauncherAppsCallback() {
+        val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps ?: return
+        launcherAppsCallback = object : LauncherApps.Callback() {
+            override fun onPackageAdded(packageName: String, user: UserHandle) {
+                loadApps()
+            }
+            override fun onPackageRemoved(packageName: String, user: UserHandle) {
+                loadApps()
+            }
+            override fun onPackageChanged(packageName: String, user: UserHandle) {
+                loadApps()
+            }
+            override fun onPackagesAvailable(packageNames: Array<out String>, user: UserHandle, replacing: Boolean) {
+                loadApps()
+            }
+            override fun onPackagesUnavailable(packageNames: Array<out String>, user: UserHandle, replacing: Boolean) {
+                loadApps()
+            }
+        }
+        launcherApps.registerCallback(launcherAppsCallback)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        launcherAppsCallback?.let {
+            val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
+            launcherApps?.unregisterCallback(it)
+        }
+    }
+
     private fun loadApps() {
         lifecycleScope.launch(Dispatchers.IO) {
             val apps = AppManager.loadAllApps(this@MainActivity, pref)
             withContext(Dispatchers.Main) {
                 allApps = apps
-                val favPkgs = pref.getFavorites()
-                favoriteApps = allApps.filter { favPkgs.contains(it.packageName) }.take(6)
+                val favIds = pref.getFavorites()
+                favoriteApps = allApps.filter { favIds.contains(it.id) }.take(6)
                 favoritesAdapter.updateList(favoriteApps)
             }
         }
@@ -170,25 +205,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun tryLaunchApp(app: AppInfo) {
+        val displayName = if (app.isClone) "${app.appName} (分身)" else app.appName
         if (app.isDopamineApp) {
             val dialog = FrictionDialog(
                 context = this,
-                appName = app.appName,
+                appName = displayName,
                 totalSeconds = pref.getFrictionSeconds(),
                 promptText = "停顿 ${pref.getFrictionSeconds()} 秒。\n确认这是你真正想做的事，还是下意识的习惯？",
                 onConfirmed = {
                     clearSearch()
-                    AppManager.launchApp(this, app.packageName)
+                    AppManager.launchApp(this, app)
                 }
             )
             dialog.show()
         } else {
             clearSearch()
-            AppManager.launchApp(this, app.packageName)
+            AppManager.launchApp(this, app)
         }
     }
 
     private fun showAppActions(app: AppInfo) {
+        val title = if (app.isClone) "${app.appName} (分身)" else app.appName
         val items = arrayOf(
             if (app.isFavorite) "从主页取消置顶" else "置顶到主页",
             if (app.isDopamineApp) "取消冷静防沉迷限制" else "设为冷静应用 (5秒倒计时阻断)",
@@ -198,41 +235,42 @@ class MainActivity : AppCompatActivity() {
         )
 
         AlertDialog.Builder(this)
-            .setTitle(app.appName)
+            .setTitle(title)
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> {
-                        pref.toggleFavorite(app.packageName)
+                        pref.toggleFavorite(app.id)
                         loadApps()
                     }
                     1 -> {
-                        pref.toggleDopamine(app.packageName)
+                        pref.toggleDopamine(app.id)
                         loadApps()
                     }
                     2 -> {
-                        pref.toggleHidden(app.packageName)
+                        pref.toggleHidden(app.id)
                         loadApps()
                     }
                     3 -> showRenameDialog(app)
-                    4 -> AppManager.openAppInfo(this, app.packageName)
+                    4 -> AppManager.openAppInfo(this, app)
                 }
             }
             .show()
     }
 
     private fun showRenameDialog(app: AppInfo) {
+        val label = if (app.isClone) "${app.originalName} (分身)" else app.originalName
         val et = EditText(this).apply {
-            hint = "如：刷短视频浪费时间"
+            hint = "如：工作微信"
             setText(app.appName)
             setSelection(text.length)
         }
 
         AlertDialog.Builder(this)
-            .setTitle("重命名「${app.originalName}」")
+            .setTitle("重命名「$label」")
             .setView(et)
             .setPositiveButton("保存") { _, _ ->
                 val alias = et.text.toString().trim()
-                pref.setAlias(app.packageName, if (alias.isEmpty()) null else alias)
+                pref.setAlias(app.id, if (alias.isEmpty()) null else alias)
                 loadApps()
             }
             .setNegativeButton("取消", null)

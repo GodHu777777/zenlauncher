@@ -29,6 +29,7 @@ class AppAdapter(
         holder.tvAppName.text = app.appName
 
         // Show/hide tags
+        holder.tvTagClone.visibility = if (app.isClone) View.VISIBLE else View.GONE
         holder.tvTagCalm.visibility = if (app.isDopamineApp) View.VISIBLE else View.GONE
         holder.tvTagHidden.visibility = if (app.isHidden) View.VISIBLE else View.GONE
         holder.tvTagPin.visibility = if (app.isFavorite) View.VISIBLE else View.GONE
@@ -47,6 +48,7 @@ class AppAdapter(
 
     class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val tvAppName: TextView = itemView.findViewById(R.id.tvAppName)
+        val tvTagClone: TextView = itemView.findViewById(R.id.tvTagClone)
         val tvTagCalm: TextView = itemView.findViewById(R.id.tvTagCalm)
         val tvTagHidden: TextView = itemView.findViewById(R.id.tvTagHidden)
         val tvTagPin: TextView = itemView.findViewById(R.id.tvTagPin)

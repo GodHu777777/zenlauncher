@@ -21,6 +21,21 @@
         android:ellipsize="end" />
 
     <TextView
+        android:id="@+id/tvTagClone"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="6dp"
+        android:background="@drawable/bg_tag_gray"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
+        android:text="分身"
+        android:textColor="@color/text_secondary"
+        android:textSize="10sp"
+        android:visibility="gone" />
+
+    <TextView
         android:id="@+id/tvTagCalm"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

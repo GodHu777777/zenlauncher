@@ -35,37 +35,36 @@ jobs:
       - name: Copy & Rename APK
         run: |
           mkdir -p build_output
-          cp app/build/outputs/apk/release/app-release.apk build_output/ZenLauncher-v2.0.0-native.apk
-          ls -lh build_output/ZenLauncher-v2.0.0-native.apk
+          cp app/build/outputs/apk/release/app-release.apk build_output/ZenLauncher-v2.0.1-native.apk
+          ls -lh build_output/ZenLauncher-v2.0.1-native.apk
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ZenLauncher-v2.0.0-native-apk
-          path: build_output/ZenLauncher-v2.0.0-native.apk
+          name: ZenLauncher-v2.0.1-native-apk
+          path: build_output/ZenLauncher-v2.0.1-native.apk
           retention-days: 14
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.0.0
-          name: ZenLauncher v2.0.0 (Native Kotlin 重构版)
+          tag_name: v2.0.1
+          name: ZenLauncher v2.0.1 (支持应用双开/分身)
           body: |
-            ## 🚀 ZenLauncher v2.0.0 - 原生 Android (Kotlin) 极简重构版
+            ## 🚀 ZenLauncher v2.0.1 - 全面支持应用双开与分身
 
-            ### ⚡ 重构核心亮点
-            - **体积缩减 96%**：从原 Flutter 版的 49MB 暴降至 **~1.5 MB**！
-            - **0% 待机功耗**：彻底移除 Flutter C++ 引擎与 Dart 虚拟机，改用系统原生 `TextClock`，不操作时 CPU 100% 深度休眠。
-            - **毫秒级冷启动**：开屏即开，响应延迟 < 30ms。
-            - **全功能无缝保留**：
-              - 极简纯文本去多巴胺主屏
-              - 全能拼音首字母模糊检索 + 网页直搜
-              - 5 秒呼吸倒计时防沉迷冷静阻断
-              - 抽屉按字母排序与管理搜索
-              - 支持应用隐藏与防诱惑别名重命名
+            ### 🌟 新增功能与体验优化
+            - **全面支持应用双开 / 应用分身**：
+              - 完美识别并检索微信分身、QQ分身等双开应用。
+              - 搜索「微信」或拼音首字母「wx」时，同时列出原微信与微信分身。
+              - 原生 `[分身]` 徽章标记，界面干净极简，一眼区分。
+              - 支持分身独立置顶至主屏、独立设置防沉迷 5 秒倒计时、独立隐藏与自定义重命名。
+            - **深度适配国产 ROM 跨 Profile 机制**：
+              - 基于系统级 `LauncherApps` 与 `UserManager` 架构，原生支持小米 HyperOS / MIUI（User 999 XSpace）、华为鸿蒙、OPPO、vivo、三星双开机制。
+              - 监听分身创建/移除广播，实时自动刷新桌面。
 
             ### 📥 下载安装
-            直接点击下方 **Assets** 列表里的 `ZenLauncher-v2.0.0-native.apk` 下载到手机安装。
-          files: build_output/ZenLauncher-v2.0.0-native.apk
+            直接点击下方 **Assets** 列表里的 `ZenLauncher-v2.0.1-native.apk` 下载到手机安装。
+          files: build_output/ZenLauncher-v2.0.1-native.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -20,6 +20,7 @@ import com.zenlauncher.app.databinding.ActivitySettingsBinding
 import com.zenlauncher.app.manager.AppManager
 import com.zenlauncher.app.manager.PrefManager
 import com.zenlauncher.app.model.AppInfo
+import com.zenlauncher.app.util.PinyinSearchEngine
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -147,16 +148,16 @@ class SettingsActivity : AppCompatActivity() {
 
             override fun onBindViewHolder(holder: VH, position: Int) {
                 val app = currentFiltered[position]
-                holder.tvName.text = app.appName
-                val isChecked = dopamineSet.contains(app.packageName)
+                holder.tvName.text = if (app.isClone) "${app.appName} (分身)" else app.appName
+                val isChecked = dopamineSet.contains(app.id)
                 holder.cb.isChecked = isChecked
 
                 holder.itemView.setOnClickListener {
-                    if (dopamineSet.contains(app.packageName)) {
-                        dopamineSet.remove(app.packageName)
+                    if (dopamineSet.contains(app.id)) {
+                        dopamineSet.remove(app.id)
                         holder.cb.isChecked = false
                     } else {
-                        dopamineSet.add(app.packageName)
+                        dopamineSet.add(app.id)
                         holder.cb.isChecked = true
                     }
                     pref.saveDopamineApps(dopamineSet)
@@ -174,15 +175,11 @@ class SettingsActivity : AppCompatActivity() {
         etSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                val q = s?.toString()?.trim()?.lowercase() ?: ""
+                val q = s?.toString()?.trim() ?: ""
                 currentFiltered = if (q.isEmpty()) {
                     sortedList
                 } else {
-                    sortedList.filter {
-                        it.appName.lowercase().contains(q) ||
-                        it.pinyin.contains(q) ||
-                        it.pinyinShort.contains(q)
-                    }
+                    PinyinSearchEngine.search(sortedList, q)
                 }
                 adapter.notifyDataSetChanged()
             }

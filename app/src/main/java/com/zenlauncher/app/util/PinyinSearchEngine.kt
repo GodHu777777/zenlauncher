@@ -13,7 +13,13 @@ object PinyinSearchEngine {
         val full = StringBuilder()
         val short = StringBuilder()
 
-        for (c in app.appName) {
+        val textToEnrich = if (app.isClone && !app.appName.contains("分身") && !app.appName.contains("双开")) {
+            "${app.appName}分身"
+        } else {
+            app.appName
+        }
+
+        for (c in textToEnrich) {
             if (Pinyin.isChinese(c)) {
                 val p = Pinyin.toPinyin(c)
                 full.append(p)
@@ -61,7 +67,17 @@ object PinyinSearchEngine {
             }
         }
 
-        matches.sortByDescending { it.score }
+        matches.sortWith { a, b ->
+            if (a.score != b.score) {
+                b.score.compareTo(a.score)
+            } else {
+                if (a.app.isClone != b.app.isClone) {
+                    if (!a.app.isClone) -1 else 1
+                } else {
+                    0
+                }
+            }
+        }
         return matches.map { it.app }
     }
 
