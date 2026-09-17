@@ -1,0 +1,197 @@
+package com.zenlauncher.app.manager
+
+import android.app.Activity
+import android.app.role.RoleManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import com.zenlauncher.app.model.AppInfo
+import com.zenlauncher.app.util.PinyinSearchEngine
+
+object AppManager {
+
+    const val REQUEST_CODE_ROLE_HOME = 1001
+
+    fun loadAllApps(context: Context, pref: PrefManager): List<AppInfo> {
+        val pm = context.packageManager
+        val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+
+        val resolveInfos: List<ResolveInfo> = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            pm.queryIntentActivities(mainIntent, PackageManager.ResolveInfoFlags.of(0L))
+        } else {
+            @Suppress("DEPRECATION")
+            pm.queryIntentActivities(mainIntent, 0)
+        }
+
+        val favorites = pref.getFavorites()
+        val hidden = pref.getHiddenApps()
+        val dopamine = pref.getDopamineApps()
+        val myPkg = context.packageName
+
+        val list = ArrayList<AppInfo>()
+
+        for (info in resolveInfos) {
+            val pkg = info.activityInfo.packageName
+            if (pkg == myPkg) continue
+
+            val originalLabel = info.loadLabel(pm).toString()
+            val customAlias = pref.getAlias(pkg)
+            val displayName = customAlias ?: originalLabel
+
+            val isSystem = (info.activityInfo.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+
+            val item = AppInfo(
+                appName = displayName,
+                originalName = originalLabel,
+                packageName = pkg,
+                activityName = info.activityInfo.name,
+                isSystemApp = isSystem,
+                isFavorite = favorites.contains(pkg),
+                isHidden = hidden.contains(pkg),
+                isDopamineApp = dopamine.contains(pkg)
+            )
+
+            PinyinSearchEngine.enrich(item)
+            list.add(item)
+        }
+
+        // Sort alphabetically by pinyin/name
+        list.sortWith { a, b ->
+            val p1 = if (a.pinyin.isNotEmpty()) a.pinyin else a.appName.lowercase()
+            val p2 = if (b.pinyin.isNotEmpty()) b.pinyin else b.appName.lowercase()
+            p1.compareTo(p2)
+        }
+
+        return list
+    }
+
+    fun launchApp(context: Context, packageName: String): Boolean {
+        return try {
+            val intent = context.packageManager.getLaunchIntentForPackage(packageName)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    fun openAppInfo(context: Context, packageName: String) {
+        try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:$packageName")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun openDefaultLauncherSettings(activity: Activity) {
+        // 1. Android Q+ RoleManager with startActivityForResult
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val roleManager = activity.getSystemService(Context.ROLE_SERVICE) as? RoleManager
+                if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_HOME)) {
+                    val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_HOME)
+                    activity.startActivityForResult(intent, REQUEST_CODE_ROLE_HOME)
+                    return
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // 2. MIUI / HyperOS Preferred App Intent
+        try {
+            val miuiIntent = Intent("miui.intent.action.PREFERRED_APP").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            if (activity.packageManager.resolveActivity(miuiIntent, 0) != null) {
+                activity.startActivity(miuiIntent)
+                return
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 3. ACTION_MANAGE_DEFAULT_APPS_SETTINGS
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                activity.startActivity(intent)
+                return
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // 4. ACTION_HOME_SETTINGS
+        try {
+            val intent = Intent(Settings.ACTION_HOME_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            activity.startActivity(intent)
+            return
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 5. Application Details Settings
+        try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:${activity.packageName}")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            activity.startActivity(intent)
+            return
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        // 6. General Settings fallback
+        try {
+            val intent = Intent(Settings.ACTION_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            activity.startActivity(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun isDefaultLauncher(context: Context): Boolean {
+        return try {
+            val intent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+            }
+            val resolveInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.resolveActivity(
+                    intent,
+                    PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+            }
+            resolveInfo?.activityInfo?.packageName == context.packageName
+        } catch (e: Exception) {
+            false
+        }
+    }
+}
