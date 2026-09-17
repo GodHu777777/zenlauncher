@@ -5,6 +5,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Release APK
@@ -40,9 +43,32 @@ jobs:
       - name: Build Release APK
         run: flutter build apk --release --no-tree-shake-icons
 
+      - name: Rename APK
+        run: cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/ZenLauncher-v1.0.0.apk
+
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ZenLauncher-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/ZenLauncher-v1.0.0.apk
           retention-days: 14
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: ZenLauncher v1.0.0
+          body: |
+            ## 📱 ZenLauncher 极简防沉迷启动器 v1.0.0
+            
+            ### ✨ 核心功能
+            - **去多巴胺化纯文本 UI**：无彩色图标、无红点通知、纯黑极简排版。
+            - **意图直达搜索**：支持拼音首字母模糊搜索，支持直接回车调用浏览器搜索。
+            - **5秒防沉迷冷静阻断**：打开高频沉迷应用（抖音/小红书/游戏）前强制触发 5 秒呼吸倒计时与反思提问。
+            - **应用隐藏与负向重命名**：从列表彻底隐藏娱乐软件，支持自定义别名。
+
+            ### 🚀 安装指引
+            点击下方 **Assets** 列表里的 `ZenLauncher-v1.0.0.apk` 直接下载到手机即可安装！
+          files: build/app/outputs/flutter-apk/ZenLauncher-v1.0.0.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
