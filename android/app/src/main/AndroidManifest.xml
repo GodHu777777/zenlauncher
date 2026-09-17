@@ -30,17 +30,12 @@
               android:resource="@style/NormalTheme"
               />
 
-            <!-- Standard App Main Entry -->
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-
-            <!-- Android Home / Launcher Category -->
+            <!-- Android Home / Launcher Category & Entry -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
         <!-- Flutter metadata -->

@@ -44,29 +44,29 @@ jobs:
         run: flutter build apk --release --no-tree-shake-icons
 
       - name: Rename APK
-        run: cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/ZenLauncher-v1.0.1.apk
+        run: cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/ZenLauncher-v1.0.2.apk
 
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ZenLauncher-release-apk
-          path: build/app/outputs/flutter-apk/ZenLauncher-v1.0.1.apk
+          path: build/app/outputs/flutter-apk/ZenLauncher-v1.0.2.apk
           retention-days: 14
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.1
-          name: ZenLauncher v1.0.1
+          tag_name: v1.0.2
+          name: ZenLauncher v1.0.2
           body: |
-            ## 📱 ZenLauncher 极简防沉迷启动器 v1.0.1
+            ## 📱 ZenLauncher 极简防沉迷启动器 v1.0.2
             
             ### ✨ 更新内容
-            - 修复并增强不同国产手机（小米/HyperOS、华为、OPPO、vivo 等）系统设置默认桌面的跳转支持。
-            - 增加「设为默认桌面」引导指南弹窗。
+            - 深度优化 AndroidManifest 的 HOME 声明，合并为标准单一主启动 Intent-Filter，确保各大系统识别。
+            - 增加对各机型设置默认桌面的支持。
 
             ### 🚀 安装指引
-            点击下方 **Assets** 列表里的 `ZenLauncher-v1.0.1.apk` 直接下载到手机安装。
-          files: build/app/outputs/flutter-apk/ZenLauncher-v1.0.1.apk
+            点击下方 **Assets** 列表里的 `ZenLauncher-v1.0.2.apk` 直接下载到手机安装。
+          files: build/app/outputs/flutter-apk/ZenLauncher-v1.0.2.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
