@@ -16,8 +16,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialog
+import android.Manifest
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import com.zenlauncher.app.databinding.ActivitySettingsBinding
 import com.zenlauncher.app.manager.AppManager
+import com.zenlauncher.app.manager.CalendarManager
 import com.zenlauncher.app.manager.PrefManager
 import com.zenlauncher.app.model.AppInfo
 import com.zenlauncher.app.util.PinyinSearchEngine
@@ -27,6 +31,19 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySettingsBinding
     private lateinit var pref: PrefManager
     private var allApps: List<AppInfo> = emptyList()
+
+    private val calendarPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+            pref.setCalendarEnabled(true)
+            updateCalendarViews()
+        } else {
+            pref.setCalendarEnabled(false)
+            updateCalendarViews()
+            Toast.makeText(this, "需要日历读取权限以展示日程", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,6 +59,7 @@ class SettingsActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateDefaultLauncherStatus()
+        updateCalendarViews()
     }
 
     private fun setupViews() {
@@ -74,6 +92,18 @@ class SettingsActivity : AppCompatActivity() {
         updateSearchEngineSummary()
         binding.btnSearchEngine.setOnClickListener {
             showSearchEngineDialog()
+        }
+
+        // Calendar & Agenda
+        updateCalendarViews()
+        binding.btnSelectCalendars.setOnClickListener {
+            showCalendarSelectionDialog()
+        }
+        binding.btnCalendarCount.setOnClickListener {
+            showCalendarCountDialog()
+        }
+        binding.btnICloudGuide.setOnClickListener {
+            showICloudGuideDialog()
         }
     }
 
@@ -262,6 +292,139 @@ class SettingsActivity : AppCompatActivity() {
                 dialog.dismiss()
             }
             .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun updateCalendarViews() {
+        val hasPermission = CalendarManager.hasCalendarPermission(this)
+        val isEnabled = pref.isCalendarEnabled() && hasPermission
+
+        binding.switchEnableCalendar.setOnCheckedChangeListener(null)
+        binding.switchEnableCalendar.isChecked = isEnabled
+        binding.layoutCalendarSubOptions.visibility = if (isEnabled) View.VISIBLE else View.GONE
+
+        binding.switchEnableCalendar.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                if (CalendarManager.hasCalendarPermission(this)) {
+                    pref.setCalendarEnabled(true)
+                    updateCalendarViews()
+                } else {
+                    calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+                }
+            } else {
+                pref.setCalendarEnabled(false)
+                updateCalendarViews()
+            }
+        }
+
+        updateCalendarCountSummary()
+        updateCalendarSelectionSummary()
+    }
+
+    private fun updateCalendarCountSummary() {
+        val count = pref.getCalendarMaxCount()
+        binding.tvCalendarCountSummary.text = "$count 条"
+    }
+
+    private fun updateCalendarSelectionSummary() {
+        val selected = pref.getSelectedCalendars()
+        if (selected.isEmpty()) {
+            binding.tvSelectCalendarsSummary.text = "全部日历"
+        } else {
+            binding.tvSelectCalendarsSummary.text = "已选 ${selected.size} 个日历"
+        }
+    }
+
+    private fun showCalendarCountDialog() {
+        val options = arrayOf("1 条", "2 条", "3 条 (推荐)", "5 条")
+        val values = intArrayOf(1, 2, 3, 5)
+        val current = pref.getCalendarMaxCount()
+        val checkedItem = values.indexOfFirst { it == current }.let { if (it >= 0) it else 2 }
+
+        AlertDialog.Builder(this)
+            .setTitle("最多展示数量")
+            .setSingleChoiceItems(options, checkedItem) { dialog, which ->
+                pref.setCalendarMaxCount(values[which])
+                updateCalendarCountSummary()
+                dialog.dismiss()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showCalendarSelectionDialog() {
+        if (!CalendarManager.hasCalendarPermission(this)) {
+            calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+            return
+        }
+
+        val calendars = CalendarManager.getAvailableCalendars(this)
+        if (calendars.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("未发现日历")
+                .setMessage("当前系统尚未检测到任何日历账户。\n\n如需连接 iCloud 日历，请参考下方指引完成配置。")
+                .setPositiveButton("我知道了", null)
+                .show()
+            return
+        }
+
+        val items = calendars.map {
+            val acc = if (it.accountName.isNotEmpty()) " (${it.accountName})" else ""
+            "${it.displayName}$acc"
+        }.toTypedArray()
+
+        val selectedSet = pref.getSelectedCalendars().toMutableSet()
+        // If selectedSet is empty, initially treat all as checked
+        val checkedItems = BooleanArray(calendars.size) { i ->
+            if (selectedSet.isEmpty()) true else selectedSet.contains(calendars[i].id.toString())
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("选择要展示的日历来源")
+            .setMultiChoiceItems(items, checkedItems) { _, which, isChecked ->
+                val idStr = calendars[which].id.toString()
+                if (isChecked) {
+                    selectedSet.add(idStr)
+                } else {
+                    selectedSet.remove(idStr)
+                }
+            }
+            .setPositiveButton("确定") { _, _ ->
+                if (selectedSet.size == calendars.size || selectedSet.isEmpty()) {
+                    pref.saveSelectedCalendars(emptySet())
+                } else {
+                    pref.saveSelectedCalendars(selectedSet)
+                }
+                updateCalendarSelectionSummary()
+            }
+            .setNeutralButton("全选") { _, _ ->
+                pref.saveSelectedCalendars(emptySet())
+                updateCalendarSelectionSummary()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showICloudGuideDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("如何在安卓上同步 iCloud 日历")
+            .setMessage(
+                "💡 Apple iCloud 日历使用标准 CalDAV 协议，Android 原生可实现秒级静默同步：\n\n" +
+                "【推荐方案：DAVx⁵ 同步（开源免费无广告）】\n" +
+                "1. 在应用商店或应用宝/酷安下载「DAVx⁵」。\n" +
+                "2. 浏览器打开 appleid.apple.com 登录，在「App 专用密码」处生成一个专用密码（安全防泄露）。\n" +
+                "3. 打开 DAVx⁵，点击添加账户：\n" +
+                "   • 选择「使用 URL 和用户名登录 CalDAV」\n" +
+                "   • 服务器 URL：caldav.icloud.com\n" +
+                "   • 用户名：你的 Apple ID 邮箱\n" +
+                "   • 密码：刚才生成的专用密码\n" +
+                "4. 勾选需要同步的日历（如工作、个人、提醒事项），点击同步即可。\n\n" +
+                "【系统自带 CalDAV 支持】\n" +
+                "• 小米 / HyperOS：设置 → 账号与同步 → 添加账号 → CalDAV\n" +
+                "• 三星 Galaxy：设置 → 账户与备份 → 管理账户 → 添加账户 → CalDAV\n\n" +
+                "⚡ 同步后日程存储在安卓本地，ZenLauncher 无需联网即可极速展示，零后台耗电，绝不泄露隐私。"
+            )
+            .setPositiveButton("我知道了", null)
             .show()
     }
 }

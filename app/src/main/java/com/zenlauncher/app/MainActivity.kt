@@ -3,8 +3,12 @@ package com.zenlauncher.app
 import android.content.Context
 import android.content.Intent
 import android.content.pm.LauncherApps
+import android.database.ContentObserver
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.UserHandle
+import android.provider.CalendarContract
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
@@ -19,9 +23,11 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.zenlauncher.app.databinding.ActivityMainBinding
 import com.zenlauncher.app.manager.AppManager
+import com.zenlauncher.app.manager.CalendarManager
 import com.zenlauncher.app.manager.PrefManager
 import com.zenlauncher.app.model.AppInfo
 import com.zenlauncher.app.ui.AppAdapter
+import com.zenlauncher.app.ui.CalendarAdapter
 import com.zenlauncher.app.ui.FrictionDialog
 import com.zenlauncher.app.util.PinyinSearchEngine
 import kotlinx.coroutines.Dispatchers
@@ -39,7 +45,9 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var favoritesAdapter: AppAdapter
     private lateinit var searchAdapter: AppAdapter
+    private lateinit var calendarAdapter: CalendarAdapter
     private var launcherAppsCallback: LauncherApps.Callback? = null
+    private var calendarObserver: ContentObserver? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,9 +66,17 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         binding.tvMotto.text = pref.getMotto()
         loadApps()
+        loadAgenda()
+        registerCalendarObserver()
     }
 
     private fun setupAdapters() {
+        calendarAdapter = CalendarAdapter(emptyList()) { event ->
+            CalendarManager.openEventDetails(this, event.eventId)
+        }
+        binding.rvAgenda.layoutManager = LinearLayoutManager(this)
+        binding.rvAgenda.adapter = calendarAdapter
+
         favoritesAdapter = AppAdapter(
             items = emptyList(),
             onItemClick = { app -> tryLaunchApp(app) },
@@ -164,6 +180,60 @@ class MainActivity : AppCompatActivity() {
         launcherAppsCallback?.let {
             val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
             launcherApps?.unregisterCallback(it)
+        }
+        unregisterCalendarObserver()
+    }
+
+    private fun loadAgenda() {
+        if (!pref.isCalendarEnabled() || !CalendarManager.hasCalendarPermission(this)) {
+            binding.layoutAgenda.visibility = View.GONE
+            return
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            val events = CalendarManager.getUpcomingEvents(this@MainActivity, pref)
+            withContext(Dispatchers.Main) {
+                if (events.isEmpty() || !pref.isCalendarEnabled()) {
+                    binding.layoutAgenda.visibility = View.GONE
+                } else {
+                    binding.layoutAgenda.visibility = View.VISIBLE
+                    calendarAdapter.updateEvents(events)
+                }
+            }
+        }
+    }
+
+    private fun registerCalendarObserver() {
+        if (!pref.isCalendarEnabled() || !CalendarManager.hasCalendarPermission(this)) {
+            unregisterCalendarObserver()
+            return
+        }
+        if (calendarObserver == null) {
+            calendarObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    loadAgenda()
+                }
+            }
+            try {
+                contentResolver.registerContentObserver(
+                    CalendarContract.Events.CONTENT_URI,
+                    true,
+                    calendarObserver!!
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    private fun unregisterCalendarObserver() {
+        calendarObserver?.let {
+            try {
+                contentResolver.unregisterContentObserver(it)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            calendarObserver = null
         }
     }
 

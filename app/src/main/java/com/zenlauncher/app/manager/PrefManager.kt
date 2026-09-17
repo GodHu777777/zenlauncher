@@ -14,6 +14,9 @@ class PrefManager(context: Context) {
         private const val KEY_MOTTO = "key_motto"
         private const val KEY_FRICTION_SECONDS = "key_friction_seconds"
         private const val KEY_SEARCH_ENGINE = "key_search_engine"
+        private const val KEY_CALENDAR_ENABLED = "key_calendar_enabled"
+        private const val KEY_CALENDAR_MAX_COUNT = "key_calendar_max_count"
+        private const val KEY_SELECTED_CALENDARS = "key_selected_calendars"
         private const val PREFIX_ALIAS = "alias_"
     }
 
@@ -127,5 +130,29 @@ class PrefManager(context: Context) {
 
     fun setSearchEngine(engine: String) {
         prefs.edit().putString(KEY_SEARCH_ENGINE, engine).apply()
+    }
+
+    fun isCalendarEnabled(): Boolean {
+        return prefs.getBoolean(KEY_CALENDAR_ENABLED, false)
+    }
+
+    fun setCalendarEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_CALENDAR_ENABLED, enabled).apply()
+    }
+
+    fun getCalendarMaxCount(): Int {
+        return prefs.getInt(KEY_CALENDAR_MAX_COUNT, 3)
+    }
+
+    fun setCalendarMaxCount(count: Int) {
+        prefs.edit().putInt(KEY_CALENDAR_MAX_COUNT, count.coerceIn(1, 10)).apply()
+    }
+
+    fun getSelectedCalendars(): Set<String> {
+        return prefs.getStringSet(KEY_SELECTED_CALENDARS, emptySet()) ?: emptySet()
+    }
+
+    fun saveSelectedCalendars(set: Set<String>) {
+        prefs.edit().putStringSet(KEY_SELECTED_CALENDARS, set).apply()
     }
 }

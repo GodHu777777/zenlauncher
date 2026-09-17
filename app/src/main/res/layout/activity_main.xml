@@ -64,6 +64,32 @@
             android:textSize="13sp"
             android:text="保持专注，活在当下" />
 
+        <!-- Optional Agenda Section (Shown if enabled & has events) -->
+        <LinearLayout
+            android:id="@+id/layoutAgenda"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:layout_marginBottom="6dp"
+                android:letterSpacing="0.08"
+                android:text="近期日程"
+                android:textColor="@color/text_hint"
+                android:textSize="12sp" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvAgenda"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:nestedScrollingEnabled="false" />
+        </LinearLayout>
+
         <View
             android:layout_width="match_parent"
             android:layout_height="0dp"

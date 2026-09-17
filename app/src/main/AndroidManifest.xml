@@ -3,6 +3,8 @@
 
     <!-- Required on Android 11+ (API 30+) to query all installed apps -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!-- Optional: Used to display upcoming events and agenda on home screen if enabled -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
 
     <queries>
         <intent>
