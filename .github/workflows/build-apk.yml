@@ -44,29 +44,30 @@ jobs:
         run: flutter build apk --release --no-tree-shake-icons
 
       - name: Rename APK
-        run: cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/ZenLauncher-v1.0.2.apk
+        run: cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/ZenLauncher-v1.0.3.apk
 
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ZenLauncher-release-apk
-          path: build/app/outputs/flutter-apk/ZenLauncher-v1.0.2.apk
+          path: build/app/outputs/flutter-apk/ZenLauncher-v1.0.3.apk
           retention-days: 14
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.2
-          name: ZenLauncher v1.0.2
+          tag_name: v1.0.3
+          name: ZenLauncher v1.0.3
           body: |
-            ## 📱 ZenLauncher 极简防沉迷启动器 v1.0.2
+            ## 📱 ZenLauncher 极简防沉迷启动器 v1.0.3
             
             ### ✨ 更新内容
-            - 深度优化 AndroidManifest 的 HOME 声明，合并为标准单一主启动 Intent-Filter，确保各大系统识别。
-            - 增加对各机型设置默认桌面的支持。
+            - **冷静应用管理增加搜索功能**：支持输入应用名、全拼、拼音首字母模糊实时检索（如输入 dy / 抖音）。
+            - **字母/拼音自动排序**：全部应用列表按字母顺序排列，查找更直观快捷。
+            - **已选数量统计**：顶部即时显示已勾选的冷静应用数量。
 
             ### 🚀 安装指引
-            点击下方 **Assets** 列表里的 `ZenLauncher-v1.0.2.apk` 直接下载到手机安装。
-          files: build/app/outputs/flutter-apk/ZenLauncher-v1.0.2.apk
+            点击下方 **Assets** 列表里的 `ZenLauncher-v1.0.3.apk` 直接下载到手机安装。
+          files: build/app/outputs/flutter-apk/ZenLauncher-v1.0.3.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

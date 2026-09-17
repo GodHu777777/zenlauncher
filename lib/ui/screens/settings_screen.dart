@@ -107,6 +107,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void _showDopamineAppsManager() {
     final theme = Theme.of(context);
     final dopamineList = List<String>.from(widget.storage.getDopamineApps());
+    String searchQuery = '';
+
+    // Sort apps alphabetically by pinyin/name
+    final sortedApps = List<AppItem>.from(widget.allApps)
+      ..sort((a, b) {
+        final p1 = a.pinyin.isNotEmpty ? a.pinyin : a.appName.toLowerCase();
+        final p2 = b.pinyin.isNotEmpty ? b.pinyin : b.appName.toLowerCase();
+        return p1.compareTo(p2);
+      });
 
     showModalBottomSheet(
       context: context,
@@ -118,8 +127,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setModalState) {
+            final filteredApps = sortedApps.where((app) {
+              if (searchQuery.isEmpty) return true;
+              final q = searchQuery.toLowerCase();
+              return app.appName.toLowerCase().contains(q) ||
+                  app.pinyin.contains(q) ||
+                  app.pinyinShort.contains(q);
+            }).toList();
+
             return DraggableScrollableSheet(
-              initialChildSize: 0.8,
+              initialChildSize: 0.85,
               maxChildSize: 0.95,
               minChildSize: 0.5,
               expand: false,
@@ -127,13 +144,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 return Column(
                   children: [
                     Padding(
-                      padding: const EdgeInsets.all(18.0),
+                      padding: const EdgeInsets.fromLTRB(18, 16, 12, 8),
                       child: Row(
                         children: [
                           Expanded(
-                            child: Text(
-                              '选择沉迷/冲动类应用 (开启5秒缓冲)',
-                              style: theme.textTheme.titleLarge?.copyWith(fontSize: 16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '选择沉迷/冲动应用 (5秒倒计时)',
+                                  style: theme.textTheme.titleLarge?.copyWith(fontSize: 16, fontWeight: FontWeight.w500),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '已选中 ${dopamineList.length} 个应用',
+                                  style: TextStyle(fontSize: 12, color: Colors.amber.shade700),
+                                ),
+                              ],
                             ),
                           ),
                           IconButton(
@@ -143,33 +170,81 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ],
                       ),
                     ),
-                    const Divider(height: 1),
-                    Expanded(
-                      child: ListView.builder(
-                        controller: scrollController,
-                        itemCount: widget.allApps.length,
-                        itemBuilder: (_, index) {
-                          final app = widget.allApps[index];
-                          final isSelected = dopamineList.contains(app.packageName);
-
-                          return CheckboxListTile(
-                            value: isSelected,
-                            title: Text(app.appName),
-                            subtitle: Text(app.packageName, style: const TextStyle(fontSize: 11)),
-                            activeColor: Colors.amber,
-                            onChanged: (val) async {
-                              if (val == true) {
-                                dopamineList.add(app.packageName);
-                              } else {
-                                dopamineList.remove(app.packageName);
-                              }
-                              await widget.storage.saveDopamineApps(dopamineList);
-                              setModalState(() {});
-                              setState(() {});
-                            },
-                          );
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                      child: TextField(
+                        autofocus: false,
+                        decoration: InputDecoration(
+                          hintText: '搜索应用名称或拼音首字母 (如: dy, 抖音)...',
+                          hintStyle: TextStyle(fontSize: 13, color: theme.colorScheme.onSurface.withOpacity(0.4)),
+                          prefixIcon: const Icon(Icons.search, size: 20),
+                          suffixIcon: searchQuery.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, size: 18),
+                                  onPressed: () {
+                                    setModalState(() {
+                                      searchQuery = '';
+                                    });
+                                  },
+                                )
+                              : null,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide(color: theme.colorScheme.outline.withOpacity(0.4)),
+                          ),
+                          isDense: true,
+                        ),
+                        onChanged: (val) {
+                          setModalState(() {
+                            searchQuery = val.trim();
+                          });
                         },
                       ),
+                    ),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: filteredApps.isEmpty
+                          ? Center(
+                              child: Text(
+                                '未搜索到匹配的应用',
+                                style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.4)),
+                              ),
+                            )
+                          : ListView.builder(
+                              controller: scrollController,
+                              itemCount: filteredApps.length,
+                              itemBuilder: (_, index) {
+                                final app = filteredApps[index];
+                                final isSelected = dopamineList.contains(app.packageName);
+
+                                return CheckboxListTile(
+                                  value: isSelected,
+                                  title: Text(
+                                    app.appName,
+                                    style: const TextStyle(fontSize: 15),
+                                  ),
+                                  subtitle: Text(
+                                    app.packageName,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: theme.colorScheme.onSurface.withOpacity(0.4),
+                                    ),
+                                  ),
+                                  activeColor: Colors.amber,
+                                  onChanged: (val) async {
+                                    if (val == true) {
+                                      dopamineList.add(app.packageName);
+                                    } else {
+                                      dopamineList.remove(app.packageName);
+                                    }
+                                    await widget.storage.saveDopamineApps(dopamineList);
+                                    setModalState(() {});
+                                    setState(() {});
+                                  },
+                                );
+                              },
+                            ),
                     ),
                   ],
                 );
