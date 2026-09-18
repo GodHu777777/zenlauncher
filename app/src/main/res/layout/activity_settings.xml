@@ -320,6 +320,69 @@
 
         </LinearLayout>
 
+        <!-- Section: About & Update -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:letterSpacing="0.08"
+            android:text="关于与更新 (ABOUT &amp; UPDATE)"
+            android:textColor="@color/text_hint"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:id="@+id/btnCheckUpdate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:background="?attr/selectableItemBackground"
+            android:orientation="vertical"
+            android:paddingTop="12dp"
+            android:paddingBottom="12dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="检查新版本"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/tvVersionSummary"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="当前版本 v2.1.1 · 点击检查更新"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/btnBackupRestore"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="?attr/selectableItemBackground"
+            android:orientation="vertical"
+            android:paddingTop="12dp"
+            android:paddingBottom="12dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="配置备份与恢复"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="导出或导入置顶、冷静黑名单、专注标语等全部设置"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+        </LinearLayout>
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

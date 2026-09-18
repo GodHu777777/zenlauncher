@@ -155,4 +155,124 @@ class PrefManager(context: Context) {
     fun saveSelectedCalendars(set: Set<String>) {
         prefs.edit().putStringSet(KEY_SELECTED_CALENDARS, set).apply()
     }
+
+    fun exportConfigJson(): String {
+        val root = org.json.JSONObject()
+        root.put("version", 1)
+        root.put("timestamp", System.currentTimeMillis())
+
+        // Favorites
+        val favArray = org.json.JSONArray()
+        getFavorites().forEach { favArray.put(it) }
+        root.put("favorites", favArray)
+
+        // Hidden
+        val hiddenArray = org.json.JSONArray()
+        getHiddenApps().forEach { hiddenArray.put(it) }
+        root.put("hidden_apps", hiddenArray)
+
+        // Dopamine
+        val dopamineArray = org.json.JSONArray()
+        getDopamineApps().forEach { dopamineArray.put(it) }
+        root.put("dopamine_apps", dopamineArray)
+
+        // Motto
+        root.put("motto", getMotto())
+
+        // Friction
+        root.put("friction_seconds", getFrictionSeconds())
+
+        // Search engine
+        root.put("search_engine", getSearchEngine())
+
+        // Calendar
+        root.put("calendar_enabled", isCalendarEnabled())
+        root.put("calendar_max_count", getCalendarMaxCount())
+        val calArray = org.json.JSONArray()
+        getSelectedCalendars().forEach { calArray.put(it) }
+        root.put("selected_calendars", calArray)
+
+        // Aliases
+        val aliasObj = org.json.JSONObject()
+        for ((key, value) in prefs.all) {
+            if (key.startsWith(PREFIX_ALIAS) && value is String) {
+                val appId = key.removePrefix(PREFIX_ALIAS)
+                aliasObj.put(appId, value)
+            }
+        }
+        root.put("aliases", aliasObj)
+
+        return root.toString(2)
+    }
+
+    fun importConfigJson(jsonStr: String): Boolean {
+        return try {
+            val root = org.json.JSONObject(jsonStr)
+            val editor = prefs.edit()
+
+            if (root.has("favorites")) {
+                val array = root.getJSONArray("favorites")
+                val set = mutableSetOf<String>()
+                for (i in 0 until array.length()) set.add(array.getString(i))
+                editor.putStringSet(KEY_FAVORITES, set)
+            }
+
+            if (root.has("hidden_apps")) {
+                val array = root.getJSONArray("hidden_apps")
+                val set = mutableSetOf<String>()
+                for (i in 0 until array.length()) set.add(array.getString(i))
+                editor.putStringSet(KEY_HIDDEN, set)
+            }
+
+            if (root.has("dopamine_apps")) {
+                val array = root.getJSONArray("dopamine_apps")
+                val set = mutableSetOf<String>()
+                for (i in 0 until array.length()) set.add(array.getString(i))
+                editor.putStringSet(KEY_DOPAMINE, set)
+            }
+
+            if (root.has("motto")) {
+                editor.putString(KEY_MOTTO, root.getString("motto"))
+            }
+
+            if (root.has("friction_seconds")) {
+                editor.putInt(KEY_FRICTION_SECONDS, root.getInt("friction_seconds"))
+            }
+
+            if (root.has("search_engine")) {
+                editor.putString(KEY_SEARCH_ENGINE, root.getString("search_engine"))
+            }
+
+            if (root.has("calendar_enabled")) {
+                editor.putBoolean(KEY_CALENDAR_ENABLED, root.getBoolean("calendar_enabled"))
+            }
+
+            if (root.has("calendar_max_count")) {
+                editor.putInt(KEY_CALENDAR_MAX_COUNT, root.getInt("calendar_max_count"))
+            }
+
+            if (root.has("selected_calendars")) {
+                val array = root.getJSONArray("selected_calendars")
+                val set = mutableSetOf<String>()
+                for (i in 0 until array.length()) set.add(array.getString(i))
+                editor.putStringSet(KEY_SELECTED_CALENDARS, set)
+            }
+
+            if (root.has("aliases")) {
+                val aliasObj = root.getJSONObject("aliases")
+                val keys = aliasObj.keys()
+                while (keys.hasNext()) {
+                    val appId = keys.next()
+                    val alias = aliasObj.getString(appId)
+                    editor.putString(PREFIX_ALIAS + appId, alias)
+                }
+            }
+
+            editor.apply()
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
 }

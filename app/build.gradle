@@ -11,17 +11,26 @@ android {
         applicationId "com.zenlauncher.app"
         minSdk 24
         targetSdk 34
-        versionCode 210
-        versionName "2.1.0"
+        versionCode 211
+        versionName "2.1.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    signingConfigs {
+        release {
+            storeFile file('zenlauncher.jks')
+            storePassword 'zenlauncher123'
+            keyAlias 'zenlauncher'
+            keyPassword 'zenlauncher123'
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled false
             shrinkResources false
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
@@ -37,6 +46,7 @@ android {
 
     buildFeatures {
         viewBinding true
+        buildConfig true
     }
 }
 

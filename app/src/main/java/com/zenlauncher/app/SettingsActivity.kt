@@ -1,6 +1,10 @@
 package com.zenlauncher.app
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -10,21 +14,28 @@ import android.view.ViewGroup
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import android.Manifest
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import com.zenlauncher.app.BuildConfig
 import com.zenlauncher.app.databinding.ActivitySettingsBinding
 import com.zenlauncher.app.manager.AppManager
 import com.zenlauncher.app.manager.CalendarManager
 import com.zenlauncher.app.manager.PrefManager
+import com.zenlauncher.app.manager.UpdateInfo
+import com.zenlauncher.app.manager.UpdateManager
 import com.zenlauncher.app.model.AppInfo
 import com.zenlauncher.app.util.PinyinSearchEngine
+import kotlinx.coroutines.launch
+import java.io.File
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -104,6 +115,17 @@ class SettingsActivity : AppCompatActivity() {
         }
         binding.btnICloudGuide.setOnClickListener {
             showICloudGuideDialog()
+        }
+
+        // About & Update
+        binding.tvVersionSummary.text = "当前版本 v${BuildConfig.VERSION_NAME} · 点击检查更新"
+        binding.btnCheckUpdate.setOnClickListener {
+            checkUpdate()
+        }
+
+        // Backup & Restore
+        binding.btnBackupRestore.setOnClickListener {
+            showBackupRestoreDialog()
         }
     }
 
@@ -425,6 +447,164 @@ class SettingsActivity : AppCompatActivity() {
                 "⚡ 同步后日程存储在安卓本地，ZenLauncher 无需联网即可极速展示，零后台耗电，绝不泄露隐私。"
             )
             .setPositiveButton("我知道了", null)
+            .show()
+    }
+
+    private fun checkUpdate() {
+        val progressDialog = AlertDialog.Builder(this)
+            .setTitle("检查新版本")
+            .setMessage("正在连接 GitHub 获取最新版本信息...")
+            .setCancelable(false)
+            .create()
+        progressDialog.show()
+
+        lifecycleScope.launch {
+            val result = UpdateManager.checkForUpdates()
+            progressDialog.dismiss()
+
+            result.onSuccess { info ->
+                if (!info.hasUpdate) {
+                    Toast.makeText(this@SettingsActivity, "当前已是最新版本 (v${BuildConfig.VERSION_NAME})", Toast.LENGTH_SHORT).show()
+                } else {
+                    showUpdateAvailableDialog(info)
+                }
+            }.onFailure { err ->
+                Toast.makeText(this@SettingsActivity, "检查更新失败: ${err.localizedMessage}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun showUpdateAvailableDialog(info: UpdateInfo) {
+        AlertDialog.Builder(this)
+            .setTitle("发现新版本 ${info.latestVersion}")
+            .setMessage("${info.releaseName}\n\n更新内容：\n${info.releaseNotes}")
+            .setPositiveButton("立即下载安装") { _, _ ->
+                startDownloadAndInstall(info.downloadUrl)
+            }
+            .setNeutralButton("网页下载") { _, _ ->
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(info.htmlUrl))
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    Toast.makeText(this, "无法打开浏览器", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("稍后再说", null)
+            .show()
+    }
+
+    private fun startDownloadAndInstall(downloadUrl: String) {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_download_progress, null)
+        val tvStatus = dialogView.findViewById<TextView>(R.id.tvDownloadStatus)
+        val progressBar = dialogView.findViewById<ProgressBar>(R.id.pbDownload)
+
+        val downloadDialog = AlertDialog.Builder(this)
+            .setTitle("下载更新中")
+            .setView(dialogView)
+            .setCancelable(false)
+            .setNegativeButton("取消") { d, _ ->
+                d.dismiss()
+            }
+            .create()
+        downloadDialog.show()
+
+        lifecycleScope.launch {
+            val result = UpdateManager.downloadApk(this@SettingsActivity, downloadUrl) { percent, current, total ->
+                runOnUiThread {
+                    if (percent >= 0) {
+                        progressBar.isIndeterminate = false
+                        progressBar.progress = percent
+                        val curMb = String.format(java.util.Locale.US, "%.1f", current / (1024f * 1024f))
+                        val totalMb = String.format(java.util.Locale.US, "%.1f", total / (1024f * 1024f))
+                        tvStatus.text = "$curMb MB / $totalMb MB ($percent%)"
+                    } else {
+                        progressBar.isIndeterminate = true
+                        val curMb = String.format(java.util.Locale.US, "%.1f", current / (1024f * 1024f))
+                        tvStatus.text = "已下载 $curMb MB..."
+                    }
+                }
+            }
+
+            downloadDialog.dismiss()
+
+            result.onSuccess { apkFile ->
+                promptInstallApk(apkFile)
+            }.onFailure { e ->
+                Toast.makeText(this@SettingsActivity, "下载失败: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun promptInstallApk(apkFile: File) {
+        if (!UpdateManager.canRequestPackageInstalls(this)) {
+            AlertDialog.Builder(this)
+                .setTitle("需要安装权限")
+                .setMessage("Android 系统需要授予 ZenLauncher「安装未知应用」权限才能完成覆盖升级。\n\n请在接下来的设置中打开此开关。")
+                .setPositiveButton("去设置") { _, _ ->
+                    UpdateManager.openInstallPermissionSettings(this)
+                }
+                .setNegativeButton("取消", null)
+                .show()
+            return
+        }
+        UpdateManager.installApk(this, apkFile)
+    }
+
+    private fun showBackupRestoreDialog() {
+        val options = arrayOf("导出配置到剪贴板", "从剪贴板导入配置")
+        AlertDialog.Builder(this)
+            .setTitle("配置备份与恢复")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> exportConfigToClipboard()
+                    1 -> showImportConfigDialog()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun exportConfigToClipboard() {
+        val json = pref.exportConfigJson()
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = ClipData.newPlainText("ZenLauncherConfig", json)
+        clipboard.setPrimaryClip(clip)
+        Toast.makeText(this, "配置已成功复制到剪贴板！可粘贴至备忘录保存。", Toast.LENGTH_LONG).show()
+    }
+
+    private fun showImportConfigDialog() {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clipText = clipboard.primaryClip?.getItemAt(0)?.text?.toString()?.trim() ?: ""
+        val initialText = if (clipText.startsWith("{") && clipText.contains("favorites")) clipText else ""
+
+        val et = EditText(this).apply {
+            hint = "在此粘贴导出的配置 JSON 文本"
+            setText(initialText)
+            setSelection(text.length)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("恢复配置")
+            .setView(et)
+            .setPositiveButton("立即恢复") { _, _ ->
+                val jsonStr = et.text.toString().trim()
+                if (jsonStr.isEmpty()) {
+                    Toast.makeText(this, "配置内容为空", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                val success = pref.importConfigJson(jsonStr)
+                if (success) {
+                    Toast.makeText(this, "配置恢复成功！", Toast.LENGTH_SHORT).show()
+                    updateDopamineSummary()
+                    updateCooldownSummary()
+                    updateMottoSummary()
+                    updateSearchEngineSummary()
+                    updateCalendarViews()
+                } else {
+                    Toast.makeText(this, "配置格式错误，恢复失败", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("取消", null)
             .show()
     }
 }
