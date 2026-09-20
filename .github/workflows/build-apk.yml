@@ -35,37 +35,38 @@ jobs:
       - name: Copy & Rename APK
         run: |
           mkdir -p build_output
-          cp app/build/outputs/apk/release/app-release.apk build_output/ZenLauncher-v2.1.2-native.apk
-          ls -lh build_output/ZenLauncher-v2.1.2-native.apk
+          cp app/build/outputs/apk/release/app-release.apk build_output/ZenLauncher-v2.1.3-native.apk
+          ls -lh build_output/ZenLauncher-v2.1.3-native.apk
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ZenLauncher-v2.1.2-native-apk
-          path: build_output/ZenLauncher-v2.1.2-native.apk
+          name: ZenLauncher-v2.1.3-native-apk
+          path: build_output/ZenLauncher-v2.1.3-native.apk
           retention-days: 14
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.1.2
-          name: ZenLauncher v2.1.2 (修复返回键/手势退出至系统桌面与锁屏回跳Bug)
+          tag_name: v2.1.3
+          name: ZenLauncher v2.1.3 (小米澎湃OS/MIUI/鸿蒙默认桌面设置终极解决方案与锁屏修复)
           body: |
-            ## 🚀 ZenLauncher v2.1.2 - 核心交互与系统桌面拦截修复
+            ## 🚀 ZenLauncher v2.1.3 - 默认桌面全面破局与系统防回跳
 
-            ### 🐛 缺陷修复与体验优化
-            - **彻底修复“返回键/全面屏手势退出至系统桌面”的严重 Bug**：
-              - 针对此前用户在桌面按返回键或从侧边滑动返回手势导致 ZenLauncher `finish` 退出、暴露底层系统桌面、进而锁屏解锁后变成系统桌面的问题，全面引入专业级系统桌面返回调度机制。
-              - 桌面根视图完全拦截并吞并返回事件，无论如何侧滑返回、按返回键，桌面始终保持驻留，绝不退出到原机系统桌面。
-              - 处于搜索状态时，按返回键或侧滑手势优雅自动清空搜索内容并收起键盘，返回最纯净主屏。
-            - **深度遵循 AOSP Launcher 系统级任务栈规范**：
-              - 声明 `taskAffinity=""`、`resumeWhilePausing="true"`、`excludeFromRecents="true"` 等系统级桌面属性，杜绝被系统多任务误杀或任务栈交错。
-              - 完善 `onNewIntent` 响应，按 Home 键或上滑返回桌面瞬间刷新至主屏。
-            - **新增主屏幕“默认桌面状态即时提醒与一键引导”**：
-              - 若当前未成功设为系统默认桌面，主屏幕顶部以极简卡片轻量提醒，一键直达系统默认桌面设置与防拦截指南；设为默认后自动完全隐藏。
+            ### 💡 针对“默认应用列表只有系统桌面、无第三方桌面”的终极解决方案
+            - **破解小米/鸿蒙等国产 ROM 的全面屏手势限制**：
+              - 国产手机系统在开启「全面屏手势」时，系统会故意在默认应用列表中隐藏所有第三方桌面（包括 KISS Launcher、Nova、ZenLauncher 等）。
+              - 新增多重一键解决通道：
+                1. **一键跳转系统桌面详情页，直接清除默认操作（10秒搞定，推荐度最高，保留全面屏手势）**；
+                2. **一键跳转系统导航方式设置，临时切为经典按键即可瞬间在系统设置中显示 ZenLauncher 并设为默认**；
+                3. **内置 ADB 内核强制设为默认桌面命令一键复制（完美兼顾全面屏手势与第三方桌面）**。
+            
+            ### 🐛 锁屏/返回键行为深度修复
+            - **桌面根视图完全拦截并消费 Back 键与侧滑手势**：彻底杜绝退出到原厂底层桌面。
+            - **AOSP 系统级 Launcher 规范声明**：独立 Task 栈、excludeFromRecents、resumeWhilePausing。
 
             ### 📥 下载安装
-            直接点击下方 **Assets** 列表里的 `ZenLauncher-v2.1.2-native.apk` 下载到手机安装（支持无缝覆盖安装，设置永久保留）。
-          files: build_output/ZenLauncher-v2.1.2-native.apk
+            直接点击下方 **Assets** 列表里的 `ZenLauncher-v2.1.3-native.apk` 下载安装（签名永久一致，无缝覆盖）。
+          files: build_output/ZenLauncher-v2.1.3-native.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

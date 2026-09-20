@@ -11,10 +11,12 @@ import android.os.UserHandle
 import android.provider.CalendarContract
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -429,6 +431,14 @@ class MainActivity : AppCompatActivity() {
         handleBackAction()
     }
 
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            handleBackAction()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     private fun hideKeyboard() {
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
         imm?.hideSoftInputFromWindow(binding.etSearch.windowToken, 0)
@@ -441,19 +451,63 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDefaultLauncherGuideDialog() {
+        val options = arrayOf(
+            "1. 清除「系统桌面」默认值 (最推荐·必成功)",
+            "2. 切换导航方式为经典按键 (解锁菜单)",
+            "3. 打开系统默认应用设置页",
+            "4. 复制 ADB 强制设为桌面命令 (免换按键)",
+            "5. 查看为什么默认应用只有系统桌面"
+        )
         AlertDialog.Builder(this)
-            .setTitle("如何设为系统默认桌面")
+            .setTitle("解决“默认应用只有系统桌面”问题")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> {
+                        Toast.makeText(this, "正在打开系统桌面详情：请滑到底部点击「清除默认操作」", Toast.LENGTH_LONG).show()
+                        AppManager.openSystemLauncherDetails(this)
+                    }
+                    1 -> {
+                        Toast.makeText(this, "将全面屏手势临时切为经典按键即可在默认桌面菜单中显示 ZenLauncher", Toast.LENGTH_LONG).show()
+                        AppManager.openSystemNavigationSettings(this)
+                    }
+                    2 -> {
+                        AppManager.openDefaultLauncherSettings(this)
+                    }
+                    3 -> {
+                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        val clip = android.content.ClipData.newPlainText("ZenLauncherAdb", AppManager.getAdbCommand())
+                        clipboard.setPrimaryClip(clip)
+                        Toast.makeText(this, "ADB 命令已复制！可在电脑终端或无线调试中执行", Toast.LENGTH_LONG).show()
+                    }
+                    4 -> showDetailedHyperOsGuideDialog()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showDetailedHyperOsGuideDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("为什么默认应用只显示系统桌面？")
             .setMessage(
-                "💡 国产手机系统（小米/HyperOS、华为/鸿蒙、vivo、OPPO 等）对桌面有安全拦截限制。若未自动弹出切换框，可通过以下方式设置：\n\n" +
-                "【最快方式】：\n" +
-                "按手机底部的 Home 键（或从屏幕底部边缘轻轻上滑返回桌面），系统通常会直接弹出「选择主屏幕应用」选择框，选择 ZenLauncher 并点击「始终」。\n\n" +
-                "【手动设置路径】：\n" +
-                "• 小米 / Redmi：设置 → 应用设置 → 应用管理 → 右上角三个点「默认应用设置」 → 桌面 → 选择 ZenLauncher\n" +
-                "• 华为 / 荣耀：设置 → 应用和服务 → 默认应用 → 桌面 → 选择 ZenLauncher\n" +
-                "• vivo / iQOO：设置 → 应用与权限 → 默认应用设置 → 桌面 → 选择 ZenLauncher\n" +
-                "• OPPO / 一加：设置 → 应用 → 默认应用 → 桌面 → 选择 ZenLauncher"
+                "💡 现象解析：\n" +
+                "在小米澎湃OS/MIUI、华为鸿蒙等系统中，只要开启了「全面屏手势」，系统底层就会故意在默认桌面列表中【隐藏所有第三方桌面】（无论 KISS、Nova 还是 ZenLauncher 都不展示），强制只保留「系统桌面」。\n\n" +
+                "【方案 1：清除系统桌面默认操作 (10秒搞定)】\n" +
+                "1. 点击下方按钮，直接跳转进入系统桌面的应用信息页。\n" +
+                "2. 滑动到最下方，点击「清除默认操作」或「默认打开 -> 清除默认值」。\n" +
+                "3. 按底部的 Home 键或上滑回桌面，系统会被迫弹出【选择主屏幕应用】弹窗，勾选 ZenLauncher 并点击【始终】！\n\n" +
+                "【方案 2：临时切换导航方式】\n" +
+                "进入「设置 -> 桌面 -> 系统导航方式」，将手势临时切为「经典按键」，此时再去默认应用设置，ZenLauncher 便会立刻出现在列表中！\n\n" +
+                "【方案 3：ADB 强制指定 (不失手势)】\n" +
+                "运行命令：adb shell cmd package set-home-activity com.zenlauncher.app/.MainActivity"
             )
-            .setPositiveButton("我知道了", null)
+            .setPositiveButton("去清除系统桌面默认值") { _, _ ->
+                AppManager.openSystemLauncherDetails(this)
+            }
+            .setNeutralButton("切换导航键") { _, _ ->
+                AppManager.openSystemNavigationSettings(this)
+            }
+            .setNegativeButton("关闭", null)
             .show()
     }
 }

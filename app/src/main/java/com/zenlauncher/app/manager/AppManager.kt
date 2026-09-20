@@ -339,4 +339,65 @@ object AppManager {
             false
         }
     }
+
+    fun openSystemLauncherDetails(context: Context) {
+        val launcherPackages = listOf(
+            "com.miui.home",
+            "com.huawei.android.launcher",
+            "com.bbk.launcher2",
+            "com.vivo.upslide",
+            "com.oppo.launcher",
+            "com.sec.android.app.launcher"
+        )
+        for (pkg in launcherPackages) {
+            try {
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:$pkg")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+                return
+            } catch (e: Exception) {
+                // Try next
+            }
+        }
+        try {
+            val intent = Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun openSystemNavigationSettings(context: Context) {
+        val intents = listOf(
+            Intent().setComponent(ComponentName("com.miui.home", "com.miui.home.settings.NavigationModeSettings")),
+            Intent("miui.intent.action.FULLSCREEN_NAVIGATION"),
+            Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.SubSettings"))
+                .putExtra(":settings:show_fragment", "com.android.settings.gestures.SystemNavigationGestureSettings")
+        )
+        for (intent in intents) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                return
+            } catch (e: Exception) {
+                // Try next
+            }
+        }
+        try {
+            val intent = Intent(Settings.ACTION_DISPLAY_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun getAdbCommand(): String {
+        return "adb shell cmd package set-home-activity com.zenlauncher.app/.MainActivity"
+    }
 }
