@@ -35,38 +35,37 @@ jobs:
       - name: Copy & Rename APK
         run: |
           mkdir -p build_output
-          cp app/build/outputs/apk/release/app-release.apk build_output/ZenLauncher-v2.1.1-native.apk
-          ls -lh build_output/ZenLauncher-v2.1.1-native.apk
+          cp app/build/outputs/apk/release/app-release.apk build_output/ZenLauncher-v2.1.2-native.apk
+          ls -lh build_output/ZenLauncher-v2.1.2-native.apk
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ZenLauncher-v2.1.1-native-apk
-          path: build_output/ZenLauncher-v2.1.1-native.apk
+          name: ZenLauncher-v2.1.2-native-apk
+          path: build_output/ZenLauncher-v2.1.2-native.apk
           retention-days: 14
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.1.1
-          name: ZenLauncher v2.1.1 (统一签名防冲突 · 应用内更新 · 配置备份恢复)
+          tag_name: v2.1.2
+          name: ZenLauncher v2.1.2 (修复返回键/手势退出至系统桌面与锁屏回跳Bug)
           body: |
-            ## 🚀 ZenLauncher v2.1.1 - 固化官方统一签名，告别卸载，支持无缝覆盖更新！
+            ## 🚀 ZenLauncher v2.1.2 - 核心交互与系统桌面拦截修复
 
-            ### 🌟 核心问题解决与重磅新特性
-            - **彻底根除“签名冲突”历史痛点**：
-              - 本次发布引入并固化了官方永久发布密钥库（`zenlauncher.jks`）。
-              - GitHub 自动构建、云端编译与本地构建签名 100% 保持一致。
-              - **从本次及后续所有版本起，用户可直接点击覆盖安装升级，再也不会提示“签名冲突”，无需先删再装，所有已配置的桌面置顶与防沉迷应用 100% 完整保留！**
-            - **应用内“检查更新”与一键升级**：
-              - 设置页新增「关于与更新」模块，实时展示当前版本。
-              - 点击「检查新版本」可秒级连通 GitHub Releases，支持应用内直接下载并自动拉起系统安装器，一键完成覆盖升级。
-            - **配置备份与恢复 (双重安全防线)**：
-              - 支持将当前所有置顶应用、冷静应用黑名单、冷静倒计时秒数、专注标语、搜索引擎及日历配置一键导出至剪贴板。
-              - 换机或清除数据后，一键粘贴备份字符串即可秒级全量恢复。
+            ### 🐛 缺陷修复与体验优化
+            - **彻底修复“返回键/全面屏手势退出至系统桌面”的严重 Bug**：
+              - 针对此前用户在桌面按返回键或从侧边滑动返回手势导致 ZenLauncher `finish` 退出、暴露底层系统桌面、进而锁屏解锁后变成系统桌面的问题，全面引入专业级系统桌面返回调度机制。
+              - 桌面根视图完全拦截并吞并返回事件，无论如何侧滑返回、按返回键，桌面始终保持驻留，绝不退出到原机系统桌面。
+              - 处于搜索状态时，按返回键或侧滑手势优雅自动清空搜索内容并收起键盘，返回最纯净主屏。
+            - **深度遵循 AOSP Launcher 系统级任务栈规范**：
+              - 声明 `taskAffinity=""`、`resumeWhilePausing="true"`、`excludeFromRecents="true"` 等系统级桌面属性，杜绝被系统多任务误杀或任务栈交错。
+              - 完善 `onNewIntent` 响应，按 Home 键或上滑返回桌面瞬间刷新至主屏。
+            - **新增主屏幕“默认桌面状态即时提醒与一键引导”**：
+              - 若当前未成功设为系统默认桌面，主屏幕顶部以极简卡片轻量提醒，一键直达系统默认桌面设置与防拦截指南；设为默认后自动完全隐藏。
 
             ### 📥 下载安装
-            直接点击下方 **Assets** 列表里的 `ZenLauncher-v2.1.1-native.apk` 下载到手机安装。
-          files: build_output/ZenLauncher-v2.1.1-native.apk
+            直接点击下方 **Assets** 列表里的 `ZenLauncher-v2.1.2-native.apk` 下载到手机安装（支持无缝覆盖安装，设置永久保留）。
+          files: build_output/ZenLauncher-v2.1.2-native.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

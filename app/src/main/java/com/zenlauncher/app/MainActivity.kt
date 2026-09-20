@@ -13,7 +13,9 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
@@ -59,15 +61,24 @@ class MainActivity : AppCompatActivity() {
 
         setupAdapters()
         setupListeners()
+        setupBackPressHandler()
         registerLauncherAppsCallback()
     }
 
     override fun onResume() {
         super.onResume()
+        updateDefaultLauncherBanner()
         binding.tvMotto.text = pref.getMotto()
         loadApps()
         loadAgenda()
         registerCalendarObserver()
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        clearSearch()
+        hideKeyboard()
     }
 
     private fun setupAdapters() {
@@ -107,6 +118,11 @@ class MainActivity : AppCompatActivity() {
     private fun setupListeners() {
         binding.btnSettings.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
+        }
+
+        binding.btnSetDefaultQuick.setOnClickListener {
+            AppManager.openDefaultLauncherSettings(this)
+            showDefaultLauncherGuideDialog()
         }
 
         binding.btnAllApps.setOnClickListener {
@@ -272,6 +288,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnClearSearch.visibility = View.GONE
         binding.layoutNormalHome.visibility = View.VISIBLE
         binding.rvSearchResults.visibility = View.GONE
+        hideKeyboard()
     }
 
     private fun tryLaunchApp(app: AppInfo) {
@@ -387,5 +404,56 @@ class MainActivity : AppCompatActivity() {
         })
 
         dialog.show()
+    }
+
+    private fun setupBackPressHandler() {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                handleBackAction()
+            }
+        })
+    }
+
+    private fun handleBackAction() {
+        if (binding.etSearch.text.isNotEmpty() || binding.rvSearchResults.visibility == View.VISIBLE) {
+            clearSearch()
+        } else {
+            // Root desktop: DO NOTHING!
+            // A home launcher must NEVER finish or return to system launcher on back press/gesture.
+            // Consuming the back event guarantees ZenLauncher stays active.
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        handleBackAction()
+    }
+
+    private fun hideKeyboard() {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        imm?.hideSoftInputFromWindow(binding.etSearch.windowToken, 0)
+        binding.etSearch.clearFocus()
+    }
+
+    private fun updateDefaultLauncherBanner() {
+        val isDefault = AppManager.isDefaultLauncher(this)
+        binding.layoutSetDefaultBanner.visibility = if (isDefault) View.GONE else View.VISIBLE
+    }
+
+    private fun showDefaultLauncherGuideDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("如何设为系统默认桌面")
+            .setMessage(
+                "💡 国产手机系统（小米/HyperOS、华为/鸿蒙、vivo、OPPO 等）对桌面有安全拦截限制。若未自动弹出切换框，可通过以下方式设置：\n\n" +
+                "【最快方式】：\n" +
+                "按手机底部的 Home 键（或从屏幕底部边缘轻轻上滑返回桌面），系统通常会直接弹出「选择主屏幕应用」选择框，选择 ZenLauncher 并点击「始终」。\n\n" +
+                "【手动设置路径】：\n" +
+                "• 小米 / Redmi：设置 → 应用设置 → 应用管理 → 右上角三个点「默认应用设置」 → 桌面 → 选择 ZenLauncher\n" +
+                "• 华为 / 荣耀：设置 → 应用和服务 → 默认应用 → 桌面 → 选择 ZenLauncher\n" +
+                "• vivo / iQOO：设置 → 应用与权限 → 默认应用设置 → 桌面 → 选择 ZenLauncher\n" +
+                "• OPPO / 一加：设置 → 应用 → 默认应用 → 桌面 → 选择 ZenLauncher"
+            )
+            .setPositiveButton("我知道了", null)
+            .show()
     }
 }

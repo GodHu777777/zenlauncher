@@ -31,6 +31,43 @@
         app:layout_constraintBottom_toTopOf="@id/layoutBottomArea"
         app:layout_constraintTop_toBottomOf="@id/btnSettings">
 
+        <!-- Subtle Reminder Banner if not set as Default Launcher -->
+        <LinearLayout
+            android:id="@+id/layoutSetDefaultBanner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_card"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:lineSpacingExtra="2dp"
+                android:text="当前未设为系统默认桌面，按返回或锁屏易跳回系统桌面"
+                android:textColor="@color/amber_accent"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/btnSetDefaultQuick"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:background="?attr/selectableItemBackground"
+                android:padding="4dp"
+                android:text="去设置 ›"
+                android:textColor="@color/white"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
         <!-- Zero-battery Native TextClock for Time -->
         <TextClock
             android:id="@+id/clockTime"
