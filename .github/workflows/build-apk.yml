@@ -178,8 +178,14 @@ jobs:
             exit 1
           fi
           test_status=0
+          # Installing a new HOME candidate can reset API 24's preferred activity.
+          # Pass the verified pre-install choice so the fixture can restore it after install.
           # Keep external-files failure screenshots available for the evidence trap.
-          ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.emulator=true -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true --stacktrace 2>&1 | tee "$evidence/gradle.txt" || test_status=$?
+          ./gradlew connectedDebugAndroidTest \
+            -Pandroid.testInstrumentationRunnerArguments.emulator=true \
+            "-Pandroid.testInstrumentationRunnerArguments.originalHome=$original_home" \
+            -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true \
+            --stacktrace 2>&1 | tee "$evidence/gradle.txt" || test_status=$?
           report_status=0
           python3 build/check-device-results.py "$test_status" || report_status=$?
           if [[ "$test_status" -ne 0 ]]; then

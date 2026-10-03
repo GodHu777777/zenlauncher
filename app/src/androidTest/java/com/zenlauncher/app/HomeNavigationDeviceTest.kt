@@ -3,6 +3,7 @@ package com.zenlauncher.app
 import android.app.Instrumentation
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
@@ -34,8 +35,10 @@ import java.util.Locale
  * Real Android system navigation, run only on an isolated emulator with `-e emulator true`.
  *
  * The fixture changes the current user's default HOME and restores it in a finally block.
- * A fresh emulator must have its stock launcher explicitly selected before installing this APK;
- * an unresolved chooser is not a restorable default and is deliberately rejected.
+ * The host records its stock launcher before installing this APK and supplies `-e originalHome
+ * package/activity`. Android may clear the old preference when a new HOME handler is installed,
+ * so the supplied component is validated and reselected before each test. Without this argument,
+ * the current HOME must already resolve to a valid stock launcher; a chooser is rejected.
  *
  * These tests cover platform HOME/Back dispatch and activity destruction, not process death,
  * OEM gesture implementations, or reboot. Force-stopping the target also kills its instrumentation
@@ -64,7 +67,7 @@ class HomeNavigationDeviceTest {
         val original = resumedHome()
 
         repeat(6) {
-            assertTrue("System Back injection failed", device.pressKeyCode(KeyEvent.KEYCODE_BACK))
+            injectNavigationKey(device, KeyEvent.KEYCODE_BACK)
             assertRoot()
             assertFalse("Root Back finished the HOME activity", original.isFinishing)
             assertFalse("Root Back destroyed the HOME activity", original.isDestroyed)
@@ -81,7 +84,7 @@ class HomeNavigationDeviceTest {
         pressHomeAndAssertRoot()
 
         assertGone("btnSetDefaultLauncher")
-        assertTrue(device.pressBack())
+        injectNavigationKey(device, KeyEvent.KEYCODE_BACK)
         assertRoot()
     }
 
@@ -89,11 +92,11 @@ class HomeNavigationDeviceTest {
     fun backFromLauncherSettingsReturnsToRoot() {
         openLauncherSettings()
 
-        assertTrue(device.pressBack())
+        injectNavigationKey(device, KeyEvent.KEYCODE_BACK)
 
         assertRoot()
         assertGone("btnSetDefaultLauncher")
-        assertTrue(device.pressBack())
+        injectNavigationKey(device, KeyEvent.KEYCODE_BACK)
         assertRoot()
     }
 
@@ -101,7 +104,7 @@ class HomeNavigationDeviceTest {
     fun backFromSystemSettingsReturnsToZenLauncher() {
         openSystemSettings()
 
-        assertTrue(device.pressBack())
+        injectNavigationKey(device, KeyEvent.KEYCODE_BACK)
 
         assertRoot()
         assertEquals(HOME_COMPONENT, home.resolveHome())
@@ -192,7 +195,7 @@ class HomeNavigationDeviceTest {
         pressHomeAndAssertRoot()
 
         assertNotSame("HOME should create a new Activity instance", original, resumedHome())
-        assertTrue(device.pressBack())
+        injectNavigationKey(device, KeyEvent.KEYCODE_BACK)
         assertRoot()
     }
 
@@ -213,7 +216,7 @@ class HomeNavigationDeviceTest {
     }
 
     private fun pressHomeAndAssertRoot() {
-        assertTrue("System HOME injection failed", device.pressHome())
+        injectNavigationKey(device, KeyEvent.KEYCODE_HOME)
         assertRoot()
     }
 
@@ -268,17 +271,17 @@ class IsolatedEmulatorHomeRule : TestRule {
             requireIsolatedEmulator()
             val userOutput = device.executeShellCommand("am get-current-user").trim()
             userId = requireNotNull(userOutput.toIntOrNull()) { "Cannot identify foreground Android user: $userOutput" }
-            val originalHome = resolveHome()
-            assertTrue(
-                "No restorable HOME: ${originalHome.flattenToShortString()}. Select the stock launcher before installing the test APK.",
-                originalHome.packageName != "android" && !originalHome.className.contains("ResolverActivity")
-            )
+            val originalHome = originalHomeFromArgumentsOrResolver()
+            validateRestorableHome(originalHome)
             Log.i(TAG, "${description.methodName}: SDK=${Build.VERSION.SDK_INT}; fingerprint=${Build.FINGERPRINT}; user=$userId; originalHome=$originalHome")
             var testFailure: Throwable? = null
             try {
                 device.wakeUp()
+                // Installing this APK can clear the emulator's preferred HOME on Android 7.
+                // Restore the verified pre-install baseline before changing it for the test.
+                setHomeAndVerify(originalHome)
                 setHomeAndVerify(HOME_COMPONENT)
-                assertTrue(device.pressHome())
+                injectNavigationKey(device, KeyEvent.KEYCODE_HOME)
                 assertTrue("ZenLauncher HOME did not appear", device.wait(Until.hasObject(By.res(APP_PACKAGE, "btnSettings")), TIMEOUT_MS))
                 base.evaluate()
             } catch (failure: Throwable) {
@@ -288,7 +291,14 @@ class IsolatedEmulatorHomeRule : TestRule {
             } finally {
                 try {
                     setHomeAndVerify(originalHome)
-                    assertTrue("Could not return to the restored HOME", device.pressHome())
+                    injectNavigationKey(device, KeyEvent.KEYCODE_HOME)
+                    assertTrue(
+                        "The restored stock HOME did not become visible: $originalHome",
+                        device.wait(Until.hasObject(By.pkg(originalHome.packageName).depth(0)), TIMEOUT_MS)
+                    )
+                    device.waitForIdle(TIMEOUT_MS)
+                    assertEquals("HOME returned to the wrong package after restoration", originalHome.packageName, device.currentPackageName)
+                    assertEquals("Default HOME changed again after restoration", originalHome, resolveHome())
                     Log.i(TAG, "${description.methodName}: restoredHome=${resolveHome()}")
                 } catch (restoreFailure: Throwable) {
                     saveFailureArtifacts(description)
@@ -309,6 +319,40 @@ class IsolatedEmulatorHomeRule : TestRule {
             "Refusing to change HOME on an unverified emulator: ro.kernel.qemu=$qemu, fingerprint=$fingerprint",
             qemu == "1" && listOf("generic", "emulator", "sdk_gphone", "sdk_google").any { it in fingerprint }
         )
+    }
+
+    private fun originalHomeFromArgumentsOrResolver(): ComponentName {
+        val supplied = InstrumentationRegistry.getArguments().getString("originalHome") ?: return resolveHome()
+        check(COMPONENT_PATTERN.matches(supplied)) { "Invalid originalHome component argument: $supplied" }
+        return requireNotNull(ComponentName.unflattenFromString(supplied)) {
+            "Cannot parse originalHome component argument: $supplied"
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun validateRestorableHome(component: ComponentName) {
+        assertTrue(
+            "Refusing a non-stock or unresolved original HOME: $component",
+            component.packageName != APP_PACKAGE && component.packageName != "android" &&
+                !component.className.contains("Resolver", ignoreCase = true)
+        )
+        val activity = instrumentation.targetContext.packageManager.getActivityInfo(component, 0)
+        assertTrue("Original HOME activity is disabled: $component", activity.enabled)
+        assertTrue("Original HOME application is disabled: $component", activity.applicationInfo.enabled)
+        assertTrue("Original HOME is not exported: $component", activity.exported)
+        assertTrue(
+            "Original HOME application is not installed: $component",
+            activity.applicationInfo.flags and ApplicationInfo.FLAG_INSTALLED != 0
+        )
+        // Query without MATCH_DISABLED_COMPONENTS/UNINSTALLED_PACKAGES to validate the effective
+        // enabled state and HOME intent support for the exact foreground Android user as well.
+        val output = device.executeShellCommand(
+            "cmd package query-activities --components --user $userId -a android.intent.action.MAIN -c android.intent.category.HOME"
+        )
+        val enabledHomes = output.lineSequence().map { it.trim() }
+            .filter { COMPONENT_PATTERN.matches(it) }
+            .mapNotNull { ComponentName.unflattenFromString(it) }.toList()
+        assertTrue("Original HOME is not an enabled HOME candidate for user $userId: $component; query=$output", component in enabledHomes)
     }
 
     fun resolveHome(): ComponentName {
@@ -368,6 +412,14 @@ private const val TIMEOUT_MS = 15_000L
 private const val TAG = "ZenHomeNavigationTest"
 private val HOME_COMPONENT = ComponentName(APP_PACKAGE, "$APP_PACKAGE.MainActivity")
 private val COMPONENT_PATTERN = Regex("[A-Za-z0-9_.$]+/[A-Za-z0-9_.$]+")
+
+private fun injectNavigationKey(device: UiDevice, keyCode: Int) {
+    device.waitForIdle(TIMEOUT_MS)
+    // In UiAutomator 2.3 pressHome()/pressBack() return whether TYPE_WINDOW_CONTENT_CHANGED was
+    // observed, which can be false when root Back is correctly consumed. pressKeyCode() instead
+    // reports successful DOWN and UP injection. Callers must separately verify navigation state.
+    assertTrue("System key injection failed: ${KeyEvent.keyCodeToString(keyCode)}", device.pressKeyCode(keyCode))
+}
 
 /** Poll real lifecycle/resolver state with a deadline; UI state uses UiDevice.wait(Until...). */
 private fun awaitCondition(condition: () -> Boolean): Boolean {
