@@ -41,6 +41,20 @@ def canonical(component):
     return package + "/" + (package + activity if activity.startswith(".") else activity)
 
 
+def host_android_processes():
+    output = command(["ps", "-eo", "pid=,ppid=,stat=,comm="], timeout=5)
+    processes = []
+    for line in output.splitlines():
+        fields = line.split(None, 3)
+        if len(fields) != 4:
+            continue
+        name = Path(fields[3]).name
+        if name.lower() == "adb" or name.lower().startswith(("emulator", "qemu")):
+            processes.append(dict(zip(("pid", "ppid", "state", "command"), fields[:3] + [name])))
+    # Command names only: omit arguments and every unrelated host process.
+    return processes
+
+
 def host_transport_diagnostics():
     """Inspect transport/process availability without reconnecting or restarting anything."""
     state = {}
@@ -49,19 +63,19 @@ def host_transport_diagnostics():
     except Exception as exc:
         state["adb_devices_error"] = str(exc)[:600]
     try:
-        output = command(["ps", "-eo", "pid=,ppid=,stat=,comm="], timeout=5)
-        processes = []
-        for line in output.splitlines():
-            fields = line.split(None, 3)
-            if len(fields) != 4:
-                continue
-            name = Path(fields[3]).name
-            if name.lower() == "adb" or name.lower().startswith(("emulator", "qemu")):
-                processes.append(dict(zip(("pid", "ppid", "state", "command"), fields[:3] + [name])))
-        # Command names only: omit arguments and every unrelated host process.
-        state["emulator_adb_processes"] = processes[:20]
+        state["emulator_adb_processes"] = host_android_processes()[:20]
     except Exception as exc:
         state["process_inspection_error"] = str(exc)[:600]
+    try:
+        kernel = subprocess.run(["dmesg"], text=True, capture_output=True, timeout=5)
+        if kernel.returncode:
+            state["kernel_log_error"] = f"dmesg exit {kernel.returncode}: {kernel.stderr.strip()[:500]}"
+        else:
+            relevant = re.compile(r"emulator|qemu|\boom(?:[_:-]|\b)|out of memory|killed process|segfault", re.IGNORECASE)
+            state["kernel_log_lines"] = [line[:600] for line in kernel.stdout.splitlines()
+                                         if relevant.search(line)][-15:]
+    except Exception as exc:
+        state["kernel_log_error"] = str(exc)[:600]
     try:
         with Path("/proc/meminfo").open() as memory_file:
             memory = memory_file.read(16384)
@@ -86,6 +100,7 @@ def main():
     error = None
     capture_failure_state = None
     reboot_pending = False
+    pre_reboot_host_processes = []
     try:
         devices = [line.split()[0] for line in command(["adb", "devices"]).splitlines()[1:]
                    if len(line.split()) == 2 and line.split()[1] == "device"]
@@ -167,7 +182,7 @@ def main():
                 raise RuntimeError(f"Invalid kernel boot_id: {value!r}")
             return value
 
-        def wait_for_boot(previous_boot_id=None, timeout=180):
+        def wait_for_boot(previous_boot_id=None, timeout=180, expected_host_processes=None):
             # One deadline covers disconnection, ADB reconnection and Android boot.
             # Observing a different boot_id prevents a stale sys.boot_completed=1
             # from making the pre-reboot system look like a successful new boot.
@@ -185,6 +200,25 @@ def main():
                             return state
                 except (RuntimeError, subprocess.TimeoutExpired) as exc:
                     state["connection_error"] = str(exc)[:500]
+                if expected_host_processes:
+                    try:
+                        current_processes = host_android_processes()
+                        live_emulator_pids = {process["pid"] for process in current_processes
+                                             if process["command"].lower().startswith(("emulator", "qemu"))
+                                             and not process["state"].startswith(("Z", "X"))}
+                        state["host_processes"] = current_processes[:20]
+                        state["expected_host_pids"] = [process["pid"] for process in expected_host_processes]
+                        # A replacement host process is not proof that the device is
+                        # gone. Keep waiting for the real boot_id in that case.
+                        all_exited = not live_emulator_pids
+                    except Exception as exc:
+                        # Unknown host process state is not proof of emulator termination.
+                        state["host_process_inspection_error"] = str(exc)[:500]
+                        all_exited = False
+                    if all_exited:
+                        report["boot_wait_state"] = state
+                        report["host_transport_at_boot_timeout"] = host_transport_diagnostics()
+                        raise RuntimeError(f"All pre-reboot emulator/QEMU host processes terminated: {state}")
                 report["boot_wait_state"] = state
                 if time.monotonic() >= deadline:
                     report["host_transport_at_boot_timeout"] = host_transport_diagnostics()
@@ -246,13 +280,18 @@ def main():
             # MENU dismisses the unsecured emulator keyguard; it cannot bypass a PIN.
             shell("input", "keyevent", "82")
             def unlocked():
-                state = {"keyguard": keyguard_state(), "user": user_state()}
+                state = {"keyguard": keyguard_state(), "user": user_state(),
+                         "foreground_user": shell("am", "get-current-user", timeout=10)}
                 report["last_unlock_state"] = state
                 guard = state["keyguard"]
+                # Android 14's KeyguardServiceDelegate caches USER_NULL (-10000)
+                # until setCurrentUser() is called after a user switch. This cache
+                # is not the authoritative foreground user; query ActivityManager.
                 return state if (guard.get("secure") is False
                                  and guard.get("showing") is False
                                  and guard.get("inputRestricted") is False
-                                 and guard.get("currentUser") == user
+                                 and guard.get("currentUser") in (user, "-10000")
+                                 and state["foreground_user"] == user
                                  and state["user"]["states"] == ["RUNNING_UNLOCKED"]) else None
             ready = eventually(f"unsecured keyguard hidden and user unlocked during {description}",
                                unlocked, timeout=45)
@@ -362,9 +401,16 @@ def main():
 
         before_reboot = boot_id()
         report["reboot"] = {"boot_id_before": before_reboot, "home_before": resolve_home()}
+        try:
+            pre_reboot_host_processes = [process for process in host_android_processes()
+                                        if process["command"].lower().startswith(("emulator", "qemu"))]
+            report["reboot"]["host_processes_before"] = pre_reboot_host_processes
+        except Exception as exc:
+            report["reboot"]["host_process_inspection_error"] = str(exc)[:500]
         reboot_pending = True
         command(adb + ["reboot"], timeout=15)
-        completed_boot = wait_for_boot(previous_boot_id=before_reboot)
+        completed_boot = wait_for_boot(previous_boot_id=before_reboot,
+                                       expected_host_processes=pre_reboot_host_processes)
         reboot_pending = False
         report["reboot"]["boot_id_after"] = completed_boot["boot_id"]
         current_user = shell("am", "get-current-user", timeout=10)
@@ -398,7 +444,7 @@ def main():
                 if reboot_pending:
                     # Recovery stays bounded even if the reboot verification timed out.
                     # Accept either boot for cleanup so a rejected reboot can still restore HOME.
-                    wait_for_boot(timeout=60)
+                    wait_for_boot(timeout=60, expected_host_processes=pre_reboot_host_processes)
                 set_home(original)
                 report["restored_home"] = resolve_home()
                 # Restore the default even if a keyguard/unlock assertion caused failure.

@@ -373,7 +373,9 @@ private class GesturalNavigationRule(private val home: IsolatedEmulatorHomeRule)
             "dumpsys activity service com.android.systemui/.SystemUIService OverviewProxyService"
         )
         quickstepService?.let { service ->
-            lastQuickstepDump = device.executeShellCommand("dumpsys activity service '${service.flattenToString()}'")
+            // UiAutomationConnection uses Runtime.exec(String), so shell quotes become literal
+            // matcher characters. This component was already restricted to a whitespace-free regex.
+            lastQuickstepDump = device.executeShellCommand("dumpsys activity service ${service.flattenToString()}")
         }
     }
 

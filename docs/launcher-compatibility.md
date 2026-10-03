@@ -83,6 +83,8 @@ Android 14 的 [OverviewComponentObserver](https://android.googlesource.com/plat
 
 [第二轮 CI 37120560464](https://github.com/GodHu777777/zenlauncher/actions/runs/37120560464)（`8429a70`）未全通过：API 24 的 11 项设备测试通过，但重启后模拟器持续未出现在 ADB，恢复阶段超时；API 34 的首次 Settings 上滑没有离开设置，尚未到最近任务往返段。模式资源与 secure setting 已为 2，但这不证明 Quickstep 已完成异步输入监听初始化；下一步需同时核验 SystemUI 连接与实际输入监听，并保留 ActiveGestureLog。ADB 断连也需宿主进程证据定位，不能直接归因于应用崩溃或预先视为环境问题。
 
+[第三轮 CI 37121305289](https://github.com/GodHu777777/zenlauncher/actions/runs/37121305289)（`1acd992`）补齐了失败现场：API 24 重启后 ADB 为空且 emulator/qemu 宿主进程消失，退出原因仍待模拟器及内核日志确认；API 34 暴露两处测试判断错误。UiAutomation 的命令通过 `Runtime.exec(String)` 执行，服务组件外的单引号被当成字面量，导致未匹配服务；Android 14 的 KeyguardServiceDelegate 则可能保留 `USER_NULL=-10000` 缓存，不代表实际前台用户错误。现已去除该查询引号，并在每次唤醒时用 `am get-current-user` 核验真实身份，同时保留用户解锁及所有 keyguard 状态断言。上述修正仍需下一轮设备验证。
+
 ## 真机回归清单
 
 先记下品牌/型号、Android 版本、完整 ROM 版本、导航方式、用户/工作资料模式、APK 版本，以及测试前系统选定的默认桌面。优先覆盖 Android 7–9、10–12、13–14 和更新系统，按键导航与手势导航分别测试。
