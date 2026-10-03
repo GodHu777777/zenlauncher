@@ -15,8 +15,8 @@ v2.1.4 的修复目标是：默认桌面请求能正确反映系统结果；返�
 | 本地 macOS | 源码与 Git 状态 | 无可用 JDK、Android SDK、adb、模拟器 |
 | 远程构建机 | JDK 17、SDK 34、Build Tools 34.0.0 | v2.1.4 构建成功；58 项测试通过；Lint 0 错误、105 警告；原证书 V1/V2 验证通过 |
 | Robolectric API 24/28/29/34 | Activity、对话框、HOME/角色判断及设置回调 | Main 27、Manager 25、Settings 6，全部通过，无跳过 |
-| 远程 Android 设备 | 实际 Home/Back、SystemUI、锁屏 | 无真机连接；已安装 API 34 AOSP 软件模拟器，首启缓慢且出现系统 Watchdog 重启，应用实测尚未完成 |
-| AOSP / Pixel 真机或模拟器 | Android 标准导航路径 | 待实测 |
+| 远程 Android 设备 | 实际 Home/Back、SystemUI、锁屏 | 无真机连接；API 34 AOSP 软件模拟器中旧 APK 安装成功，但系统服务频繁 ANR/崩溃，已停止本次尝试并保留 AVD |
+| AOSP / Pixel 真机或模拟器 | Android 标准导航路径 | 升级、HOME、Back 及应用抽屉实测未执行，仍待稳定设备验证 |
 | 小米 / HyperOS / MIUI | 按键、全面屏手势、默认桌面入口 | 待实测，尤其关注厂商手势限制 |
 | 华为 / EMUI（支持 APK） | 默认桌面与系统导航 | 待实测 |
 | OPPO / ColorOS、vivo / OriginOS | 默认桌面与系统导航 | 待实测 |
@@ -25,6 +25,14 @@ v2.1.4 的修复目标是：默认桌面请求能正确反映系统结果；返�
 测试报告与签名验证结果由 GitHub Actions 的 `verification-reports` artifact 保存。构建通过不能标记上表的真机项目为通过。
 
 用户所报告的回到原厂桌面问题，仍需具体机型、ROM 版本、触发方式及新版诊断来完成闭环。原 v2.1.3 与 v2.1.4 安装包的签名证书 SHA-256 均为 `337b92f7bda67e7c2ea553ba969e707257c3d438c3a9320c94f58b3414e7820c`。
+
+### AOSP 软件模拟尝试的边界
+
+本轮创建了独立 API 34 AOSP x86_64（镜像 revision 4、Android Emulator 37.2.12）设备，配置 2 个虚拟 CPU、2 GB 客体内存。构建用户无法访问 KVM，因而使用软件模拟；模拟器进程限制为 2 个宿主 CPU。SDK、AVD 和测试证据保留在远程数据分区。
+
+系统首次启动出现主线程阻塞 92 秒的 Watchdog 重启。为适应软件模拟，测试环境将 `watchdog_timeout_millis` 增至 600000，并关闭界面动画；其后仍发生 SystemUI、NetworkStack、Bluetooth 的 ANR，最终由 `IllegalStateException: Lost network stack` 导致系统进程再次退出。上述故障发生时尚未启动 ZenLauncher，不能据此认定应用失败。
+
+曾读取到 `sys.boot_completed=1`，旧 v2.1.3 APK 安装后的包名也已出现在系统包列表。但系统服务随即再次失效，无法完成新版覆盖升级、HOME 解析、返回键、应用抽屉、锁屏或角色授权 UI 验证。已保存启动事件、系统崩溃日志和黑屏截图，并停止本次模拟器进程。这些材料用于解释验证环境的限制，不构成任何应用运行时场景的通过证据；后续应使用可访问 KVM 的模拟器或真机继续验证。
 
 ## 自动化检查
 
