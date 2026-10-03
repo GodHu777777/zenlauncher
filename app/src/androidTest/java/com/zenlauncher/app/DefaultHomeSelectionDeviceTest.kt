@@ -223,23 +223,31 @@ class DefaultHomeSelectionDeviceTest {
         val output = ByteArrayOutputStream()
         device.dumpWindowHierarchy(output)
         val parser = Xml.newPullParser().apply { setInput(StringReader(output.toString("UTF-8"))) }
-        val nodes = mutableListOf<String>()
-        while (parser.eventType != XmlPullParser.END_DOCUMENT && nodes.size < 20) {
+        val foreground = device.currentPackageName
+        val nodes = mutableListOf<Pair<Boolean, String>>()
+        while (parser.eventType != XmlPullParser.END_DOCUMENT) {
             if (parser.eventType == XmlPullParser.START_TAG && parser.name == "node") {
                 fun attribute(name: String) = parser.getAttributeValue(null, name).orEmpty()
                 val text = attribute("text").replace(Regex("\\s+"), " ")
+                val description = attribute("content-desc").replace(Regex("\\s+"), " ")
                 val id = attribute("resource-id")
                 val bounds = attribute("bounds")
                 val checkable = attribute("checkable") == "true"
                 val visible = attribute("visible-to-user") != "false" && bounds != "[0,0][0,0]"
-                if (visible && (text.isNotEmpty() || id.isNotEmpty() || checkable)) {
-                    nodes += "t='${text.take(60)}' id='${id.take(85)}' c=${attribute("class").substringAfterLast('.')} " +
-                        "checked=${attribute("checked")} clickable=${attribute("clickable")} b=$bounds"
+                if (visible && attribute("package") == foreground &&
+                    (text.isNotEmpty() || description.isNotEmpty() || id.isNotEmpty() || checkable)) {
+                    val meaningful = text.isNotEmpty() || description.isNotEmpty() || checkable
+                    nodes += meaningful to ("t='${text.take(60)}' desc='${description.take(60)}' id='${id.take(75)}' " +
+                        "c=${attribute("class").substringAfterLast('.')} checked=${attribute("checked")} " +
+                        "clickable=${attribute("clickable")} b=$bounds")
                 }
             }
             parser.next()
         }
-        "ui=[${nodes.joinToString("; ")}]".take(2200)
+        // System bars appear first in the dump. Prioritize the actual foreground choices so
+        // their labels and descriptions survive the public annotation's size limit.
+        val selected = nodes.sortedByDescending { it.first }.take(20).map { it.second }
+        "ui(package=$foreground, nodes=${nodes.size})=[${selected.joinToString("; ")}]".take(2200)
     }.getOrElse { "UI dump failed: ${it.javaClass.simpleName}: ${it.message}".take(2200) }
 
     private fun res(id: String) = By.res(ZEN_PACKAGE, id)

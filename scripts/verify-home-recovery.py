@@ -49,6 +49,7 @@ def main():
     report = {"checks": [], "success": False}
     original = None
     error = None
+    capture_failure_state = None
     try:
         devices = [line.split()[0] for line in command(["adb", "devices"]).splitlines()[1:]
                    if len(line.split()) == 2 and line.split()[1] == "device"]
@@ -67,8 +68,12 @@ def main():
         user = shell("am", "get-current-user")
         if not user.isdigit():
             raise RuntimeError(f"Unknown Android user: {user!r}")
-        report.update(serial=serial, fingerprint=fingerprint, user=int(user),
-                      sdk=shell("getprop", "ro.build.version.sdk"))
+        sdk = shell("getprop", "ro.build.version.sdk")
+        report.update(serial=serial, fingerprint=fingerprint, user=int(user), sdk=sdk)
+        # Since Android 10, mCurrentFocus belongs to DisplayContent.dump(), which
+        # the "windows" subcommand does not call. Android 7 prints it in "windows".
+        # Read the current section directly, excluding historical last-ANR dumps.
+        focus_dump = ("dumpsys", "window", "displays" if int(sdk) >= 29 else "windows")
 
         def resolve_home():
             output = shell("cmd", "package", "resolve-activity", "--brief", "--user", user,
@@ -99,7 +104,7 @@ def main():
             )
 
         def home_has_focus():
-            windows = shell("dumpsys", "window", "windows")
+            windows = shell(*focus_dump)
             return any("mCurrentFocus" in line and (HOME in line or canonical(HOME) in line)
                        for line in windows.splitlines())
 
@@ -117,6 +122,32 @@ def main():
             output = shell("pidof", PACKAGE, allow_missing=True)
             return set(output.split()) if output else set()
 
+        def navigation_state():
+            # Record before restoring stock HOME, so failures retain their actual state.
+            # Keep public annotations focused on navigation, without unrelated logcat.
+            probes = {
+                "resolved_home": resolve_home,
+                "pids": lambda: sorted(pids()),
+                "resumed_activity_lines": lambda: [
+                    line.strip()[:600]
+                    for line in shell("dumpsys", "activity", "activities").splitlines()
+                    if "mResumedActivity" in line or "topResumedActivity" in line
+                ][:8],
+                "focus_lines": lambda: [
+                    line.strip()[:600] for line in shell(*focus_dump).splitlines()
+                    if any(marker in line for marker in
+                           ("mCurrentFocus", "mFocusedApp", "mTopFocusedDisplayId"))
+                ][:8],
+            }
+            state = {"focus_dump_command": " ".join(focus_dump)}
+            for name, probe in probes.items():
+                try:
+                    state[name] = probe()
+                except Exception as exc:
+                    state[name + "_error"] = str(exc)[:600]
+            return state
+
+        capture_failure_state = navigation_state
         original = resolve_home()
         if original.startswith("android/") or "ResolverActivity" in original:
             original = None
@@ -159,6 +190,10 @@ def main():
         report["checks"].append("Back is consumed after process recovery")
     except Exception as exc:
         error = str(exc)
+        if capture_failure_state is not None:
+            report["failure_state"] = capture_failure_state()
+            error += "\nNavigation state before cleanup: " + json.dumps(
+                report["failure_state"], ensure_ascii=False)
         report["error"] = error
     finally:
         if original is not None:
