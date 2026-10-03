@@ -87,6 +87,14 @@ Android 14 的 [OverviewComponentObserver](https://android.googlesource.com/plat
 
 [第四轮 CI 37122326563](https://github.com/GodHu777777/zenlauncher/actions/runs/37122326563)（`87eedd2`）在运行器内提前返回 127，没有产生新的设备测试或恢复结果。模拟器二进制的裸 `-version` 查询也会启动后端，不能假设它与无窗口运行使用相同依赖；版本采集现改为读取已安装 SDK 的 `source.properties`，避免额外启动进程。同时增加运行脚本的失败行号与具体命令提示。日志重定向已按运行器实际参数解析方式在本地验证；此轮 127 的具体失败命令尚未由现场日志确认。
 
+### 正式 APK 覆盖升级验证
+
+独立工作流 `verify-release-upgrade.yml` 在相关源码、构建文件或验证脚本推送到 `main` 时运行，也支持手动启动。它使用全新 API 24 / 34 模拟器，先安装 GitHub 正式 v2.1.3，再以 `adb install -r` 安装该提交使用永久密钥构建的 Release。两包的实际版本号、非 Debug 属性、V1/V2 和证书均先校验；候选包只作为测试产物，不覆盖已发布版本。
+
+正式 v2.1.3 资产的 SHA-256 为 `6d892040ddfe6c34fc3caba336d2d98fd24b154be487681ba8aabbaefb55be5b`，已下载并与 GitHub asset digest 对照，同时实际验证版本 213、原证书及 V1/V2。用户本地同版本构建的 SHA-256 不同，因此测试明确固定线上正式资产。
+
+`scripts/verify-release-upgrade.py` 通过真实设置界面保存唯一标语，先验证旧版本强停后的持久化，再在系统设置前台覆盖升级。升级后不重设 ZenLauncher HOME、不恢复配置、不显式启动主界面，检查实际 HOME 解析、系统 Home 按键、新进程、标语和根返回行为。测试拒绝已有安装或残留数据，结束时恢复系统桌面并保留升级后的应用数据。报告保存于 `signed-release-upgrade-api-24-evidence` / `signed-release-upgrade-api-34-evidence`；新增流程尚待首次设备结果，不能仅凭脚本存在认定覆盖升级已通过。
+
 ## 真机回归清单
 
 先记下品牌/型号、Android 版本、完整 ROM 版本、导航方式、用户/工作资料模式、APK 版本，以及测试前系统选定的默认桌面。优先覆盖 Android 7–9、10–12、13–14 和更新系统，按键导航与手势导航分别测试。
