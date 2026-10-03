@@ -11,8 +11,10 @@ import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.net.Uri
 import android.os.Build
+import android.os.Process
 import android.os.UserManager
 import android.provider.Settings
+import android.widget.Toast
 import com.zenlauncher.app.model.AppInfo
 import com.zenlauncher.app.util.PinyinSearchEngine
 
@@ -197,7 +199,9 @@ object AppManager {
                 e.printStackTrace()
             }
         }
-        return launchApp(context, app.packageName)
+        // PackageManager launches in the current user. A failed profile-specific request must
+        // never silently open the personal copy of the same package instead.
+        return canUseCurrentUserFallback(app) && launchApp(context, app.packageName)
     }
 
     fun launchApp(context: Context, packageName: String): Boolean {
@@ -216,31 +220,41 @@ object AppManager {
         }
     }
 
-    fun openAppInfo(context: Context, app: AppInfo) {
+    fun openAppInfo(context: Context, app: AppInfo): Boolean {
         val launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
         if (launcherApps != null && app.userHandle != null) {
             try {
                 val componentName = ComponentName(app.packageName, app.activityName)
                 launcherApps.startAppDetailsActivity(componentName, app.userHandle, null, null)
-                return
+                return true
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
-        openAppInfo(context, app.packageName)
+        val opened = canUseCurrentUserFallback(app) && openAppInfo(context, app.packageName)
+        if (!opened) {
+            Toast.makeText(context, "无法打开所选应用的详情，它可能已停用或所属用户空间不可用", Toast.LENGTH_LONG).show()
+        }
+        return opened
     }
 
-    fun openAppInfo(context: Context, packageName: String) {
-        try {
+    fun openAppInfo(context: Context, packageName: String): Boolean {
+        return try {
             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                 data = Uri.parse("package:$packageName")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
+            true
         } catch (e: Exception) {
             e.printStackTrace()
+            false
         }
     }
+
+    private fun canUseCurrentUserFallback(app: AppInfo): Boolean =
+        !app.isClone && app.userId == 0L &&
+            (app.userHandle == null || app.userHandle == Process.myUserHandle())
 
     fun openDefaultLauncherSettings(activity: Activity) {
         DefaultLauncherManager.requestDefaultLauncher(activity, REQUEST_CODE_ROLE_HOME)
