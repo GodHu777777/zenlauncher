@@ -85,6 +85,8 @@ Android 14 的 [OverviewComponentObserver](https://android.googlesource.com/plat
 
 [第三轮 CI 37121305289](https://github.com/GodHu777777/zenlauncher/actions/runs/37121305289)（`1acd992`）补齐了失败现场：API 24 重启后 ADB 为空且 emulator/qemu 宿主进程消失，退出原因仍待模拟器及内核日志确认；API 34 暴露两处测试判断错误。UiAutomation 的命令通过 `Runtime.exec(String)` 执行，服务组件外的单引号被当成字面量，导致未匹配服务；Android 14 的 KeyguardServiceDelegate 则可能保留 `USER_NULL=-10000` 缓存，不代表实际前台用户错误。现已去除该查询引号，并在每次唤醒时用 `am get-current-user` 核验真实身份，同时保留用户解锁及所有 keyguard 状态断言。上述修正仍需下一轮设备验证。
 
+[第四轮 CI 37122326563](https://github.com/GodHu777777/zenlauncher/actions/runs/37122326563)（`87eedd2`）在运行器内提前返回 127，没有产生新的设备测试或恢复结果。模拟器二进制的裸 `-version` 查询也会启动后端，不能假设它与无窗口运行使用相同依赖；版本采集现改为读取已安装 SDK 的 `source.properties`，避免额外启动进程。同时增加运行脚本的失败行号与具体命令提示。日志重定向已按运行器实际参数解析方式在本地验证；此轮 127 的具体失败命令尚未由现场日志确认。
+
 ## 真机回归清单
 
 先记下品牌/型号、Android 版本、完整 ROM 版本、导航方式、用户/工作资料模式、APK 版本，以及测试前系统选定的默认桌面。优先覆盖 Android 7–9、10–12、13–14 和更新系统，按键导航与手势导航分别测试。

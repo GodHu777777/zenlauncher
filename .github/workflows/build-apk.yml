@@ -163,9 +163,16 @@ jobs:
           set -euo pipefail
           evidence=build/emulator-evidence
           logcat_pid=
+          report_runner_failure() {
+            local runner_exit=$1 runner_line=$2 failed_command=$3
+            failed_command="${failed_command//%/%25}"
+            failed_command="${failed_command//$'\n'/%0A}"
+            echo "::error title=Emulator test runner command::Line $runner_line exited $runner_exit: $failed_command"
+            return "$runner_exit"
+          }
           collect_evidence() {
             local status=$?
-            trap - EXIT
+            trap - EXIT ERR
             set +e
             # Capture while the device is still running; the action stops it on return.
             timeout 15s adb shell dumpsys activity activities > "$evidence/activity.txt" 2>&1
@@ -190,15 +197,19 @@ jobs:
             exit "$status"
           }
           trap collect_evidence EXIT
+          trap 'report_runner_failure "$?" "$LINENO" "$BASH_COMMAND"' ERR
           trap 'exit 143' TERM
           trap 'exit 130' INT
           adb logcat -c
           adb logcat -v threadtime > "$evidence/logcat.txt" 2>&1 &
           logcat_pid=$!
           adb shell getprop > "$evidence/device-properties.txt"
-          if [[ -x "$ANDROID_HOME/emulator/emulator" ]]; then
-            "$ANDROID_HOME/emulator/emulator" -version > "$evidence/emulator-version.txt" 2>&1
-            echo "::notice title=Emulator runtime::$(head -n 1 "$evidence/emulator-version.txt")"
+          # Querying `emulator -version` also launches a backend and can require
+          # GUI libraries. Read the installed SDK metadata without a second process.
+          if [[ -r "$ANDROID_HOME/emulator/source.properties" ]]; then
+            cp "$ANDROID_HOME/emulator/source.properties" "$evidence/emulator-source.properties"
+            emulator_revision="$(sed -n 's/^Pkg.Revision[[:space:]]*=[[:space:]]*//p' "$evidence/emulator-source.properties")"
+            echo "::notice title=Emulator runtime::SDK emulator package revision: $emulator_revision"
           fi
           # Set an explicit stock HOME before Gradle installs a second HOME candidate.
           # The instrumentation fixture can then restore a known choice after each test.
