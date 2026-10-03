@@ -16,8 +16,8 @@ v2.1.4 的修复目标是：默认桌面请求能正确反映系统结果；返�
 | 远程构建机 | JDK 17、SDK 34、Build Tools 34.0.0 | v2.1.5 构建成功；58 项测试通过；Lint 0 错误、108 警告；原证书 V1/V2 验证通过 |
 | Robolectric API 24/28/29/34 | Activity、对话框、HOME/角色判断及设置回调 | Main 27、Manager 25、Settings 6，全部通过，无跳过 |
 | 远程 Android 设备 | 实际 Home/Back、SystemUI、锁屏 | 无真机连接；API 34 AOSP 软件模拟器中旧 APK 安装成功，但系统服务频繁 ANR/崩溃，已停止本次尝试并保留 AVD |
-| GitHub KVM / Android 7.0（API 24） | Android 标准导航、抽屉、Activity 销毁及进程终止后的 HOME 恢复 | `89561a4` 的 9 项设备测试全部通过、无跳过，进程恢复 3 项检查通过；实际授权 UI、升级及重启尚未验证 |
-| GitHub KVM / Android 14（API 34） | 相同导航、实际系统授权及进程终止后的恢复 | `3fb69ba` 的 11 项设备测试全部通过、无跳过，进程恢复 3 项检查通过；厂商手势、升级及重启仍未覆盖 |
+| GitHub KVM / Android 7.0（API 24） | 实际系统授权/取消、Home/Back、抽屉、Activity 销毁及进程终止后的恢复 | 发布提交 `21e1fbb`：11 项设备测试、3 项进程恢复检查全部通过，0 失败、0 跳过 |
+| GitHub KVM / Android 14（API 34） | 相同导航、实际系统授权及进程终止后的恢复 | 同一发布提交：11 项设备测试、3 项进程恢复检查全部通过，0 失败、0 跳过 |
 | AOSP / Pixel 真机 | 实际手势、锁屏及升级 | 待实测 |
 | 小米 / HyperOS / MIUI | 按键、全面屏手势、默认桌面入口 | 待实测，尤其关注厂商手势限制 |
 | 华为 / EMUI（支持 APK） | 默认桌面与系统导航 | 待实测 |
@@ -26,15 +26,9 @@ v2.1.4 的修复目标是：默认桌面请求能正确反映系统结果；返�
 
 测试报告与签名验证结果由 GitHub Actions 的 `verification-reports` artifact 保存。构建通过不能标记上表的真机项目为通过。
 
-API 24 的通过证据来自 [CI 37116355598](https://github.com/GodHu777777/zenlauncher/actions/runs/37116355598)。该次构建检查通过，但 API 34 的 KVM 初始化失败，因此整次工作流未通过且发布步骤跳过。后续提交新增了授权/取消测试，须再次运行，不能直接沿用这 9 例的通过结果。
+最终验证来自 [CI 37118600772](https://github.com/GodHu777777/zenlauncher/actions/runs/37118600772)：构建、两个设备任务和发布全部成功，均对应提交 `21e1fbb7833113f9c64de00205c9371e750aac2a`。[v2.1.5 正式 APK](https://github.com/GodHu777777/zenlauncher/releases/tag/v2.1.5) 为 4,912,929 字节，SHA-256 为 `62ea992172ad1624fe7666c1b852968e3d7e356b35b708ca9b19b584acadfce9`；下载后已与 GitHub asset digest 比对。
 
-v2.1.5 首轮 [CI 37116709097](https://github.com/GodHu777777/zenlauncher/actions/runs/37116709097) 在两个 API 都进入了真实的系统选择界面，但新增两例因控件定位不匹配失败。此结果只证明测试未完成授权操作；该轮进程恢复和发布均未执行，不能计为 11 项设备测试通过，也不能据此认定应用默认桌面授权失败。
-
-[CI 37117421765](https://github.com/GodHu777777/zenlauncher/actions/runs/37117421765) 已在 API 34 通过全部 11 例，包括真实系统授权与取消。其后主机脚本在首次 HOME 焦点确认时超时：Android 14 的 `dumpsys window windows` 不包含位于显示区域状态中的 `mCurrentFocus`。修正读取方式后仍需重新执行进程终止和恢复检查，不能把该次超时直接归因于应用。API 24 的系统选择页仍未找到预期候选文字，尚待实际界面诊断。
-
-[CI 37118043822](https://github.com/GodHu777777/zenlauncher/actions/runs/37118043822) 已完成 API 34 的 11 项设备测试与 3 项进程恢复检查。API 24 的实际界面也确认：`ACTION_HOME_SETTINGS` 先打开默认应用配置页，需要点击“Home app”再打开应用列表弹窗；选择后弹窗自动关闭，取消则需分别退出弹窗和配置页。测试已按此实际流程修正，API 24 新增授权/取消两例须等待后续运行通过。
-
-用户所报告的回到原厂桌面问题，仍需具体机型、ROM 版本、触发方式及新版诊断来完成闭环。原 v2.1.3 与 v2.1.4 安装包的签名证书 SHA-256 均为 `337b92f7bda67e7c2ea553ba969e707257c3d438c3a9320c94f58b3414e7820c`。
+用户所报告的回到原厂桌面问题，仍需具体机型、ROM 版本、触发方式及新版诊断来完成闭环。v2.1.3、v2.1.4 与 v2.1.5 使用相同签名证书，SHA-256 为 `337b92f7bda67e7c2ea553ba969e707257c3d438c3a9320c94f58b3414e7820c`。本轮未把真机、厂商手势、锁屏、重启、配置保留或 Release 覆盖升级标为通过。
 
 ### AOSP 软件模拟尝试的边界
 
@@ -61,7 +55,9 @@ v2.1.5 首轮 [CI 37116709097](https://github.com/GodHu777777/zenlauncher/action
 
 CI 新增 API 24 和 API 34 的独立 KVM 模拟器任务。先在系统内实际执行 `HomeNavigationDeviceTest`，检查 Home/Back、内部与系统设置页、搜索与抽屉退出、已安装应用的可见性和启动，以及 Activity 销毁后的恢复。随后从应用进程外执行 `scripts/verify-home-recovery.py`：在系统设置前台终止 ZenLauncher，验证旧进程已退出，再发送系统 Home 键并检查新进程、实际前台页面和返回行为。
 
-`DefaultHomeSelectionDeviceTest` 另有授权与取消两例：以原桌面为起点，从普通应用入口打开 ZenLauncher，点击应用内的设置按钮，在 Android 7 的默认桌面设置或 Android 14 的 HOME 角色弹窗完成真实选择。此过程中不会用 shell 将 ZenLauncher 设为默认；完成后核验角色、HOME 解析、设置提示和实际按键去向，取消时检查仍保留原桌面。新增两例的通过情况以 CI 实际结果为准。
+`DefaultHomeSelectionDeviceTest` 另有授权与取消两例：以原桌面为起点，从普通应用入口打开 ZenLauncher，点击应用内的设置按钮，在 Android 7 的默认桌面设置或 Android 14 的 HOME 角色弹窗完成真实选择。此过程中不会用 shell 将 ZenLauncher 设为默认；完成后核验角色、HOME 解析、设置提示和实际按键去向，取消时检查仍保留原桌面。两例均已包含在上表的 11 项设备测试中。
+
+两个系统采用各自真实的操作路径：Android 7 的 `ACTION_HOME_SETTINGS` 先打开默认应用配置页，再进入“Home app”列表弹窗；Android 14 通过 HOME 角色弹窗选择并确认。进程恢复检查也按系统版本读取实际焦点：API 29 起使用 `dumpsys window displays`，旧版使用 `dumpsys window windows`，避免遗漏新版焦点字段或读取历史 ANR 快照。
 
 本机手动执行时也必须使用可重置的模拟器。先记录尚未安装 ZenLauncher 时的原桌面组件，并将其传入测试；Android 7 安装第二个 HOME 应用后可能重新显示选择器，不能依赖安装前的选择仍然有效：
 
