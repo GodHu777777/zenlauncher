@@ -162,23 +162,27 @@ class GestureNavigationDeviceTest {
     }
 
     private fun swipeHome() {
-        navigation.assertGesturalMode()
+        navigation.awaitBottomGestureReady(systemRecentsComponent())
         val width = device.displayWidth
         val height = device.displayHeight
         // A continuous bottom-edge swipe with no hold. Each caller verifies the HOME outcome;
         // step count alone does not prove how Quickstep classified the release velocity.
-        assertTrue("Bottom HOME touch injection failed", device.swipe(width / 2, height - 2, width / 2, height / 3, 24))
+        navigation.injectBottomGesture("HOME (${width / 2},${height - 2})->(${width / 2},${height / 3}), steps=24") {
+            device.swipe(width / 2, height - 2, width / 2, height / 3, 24)
+        }
     }
 
     private fun swipeOverviewAndHold() {
-        navigation.assertGesturalMode()
+        navigation.awaitBottomGestureReady(systemRecentsComponent())
         val x = device.displayWidth / 2
         val endY = device.displayHeight / 3
         // UiAutomator 2.3 emits MOVE events even between identical points, at least 5 ms apart.
         // One moving segment followed by six stationary segments keeps the same pointer down
         // for at least 690 ms at the endpoint, making this an explicit swipe-and-hold gesture.
         val points = Array(8) { index -> Point(x, if (index == 0) device.displayHeight - 2 else endY) }
-        assertTrue("Overview swipe-and-hold injection failed", device.swipe(points, 24))
+        navigation.injectBottomGesture("OVERVIEW (${points.first().x},${points.first().y})->($x,$endY), movingSegments=1 holdSegments=6 steps=24") {
+            device.swipe(points, 24)
+        }
     }
 
     private fun systemRecentsComponent(): ComponentName {
@@ -262,6 +266,10 @@ class GestureNavigationDeviceTest {
 private class GesturalNavigationRule(private val home: IsolatedEmulatorHomeRule) : TestRule {
     private val device: UiDevice get() = home.device
     private var userId = -1
+    private var quickstepService: ComponentName? = null
+    private var lastQuickstepDump = ""
+    private var lastSystemUiDump = ""
+    private var lastBottomInput = "none"
 
     override fun apply(base: Statement, description: Description): Statement = object : Statement() {
         override fun evaluate() {
@@ -305,6 +313,91 @@ private class GesturalNavigationRule(private val home: IsolatedEmulatorHomeRule)
     fun assertGesturalMode() {
         assertEquals("Navigation resource must still report gestural mode", 2, resourceMode())
         assertEquals("SystemUI must have published gestural mode", "2", secureMode())
+    }
+
+    fun awaitBottomGestureReady(recents: ComponentName) {
+        device.waitForIdle(GESTURE_TIMEOUT_MS)
+        assertGesturalMode()
+        if (quickstepService == null) {
+            check(Regex("[A-Za-z0-9_.]+").matches(recents.packageName))
+            val services = device.executeShellCommand(
+                "cmd package query-services --brief --components --user $userId " +
+                    "-a android.intent.action.QUICKSTEP_SERVICE -p ${recents.packageName}"
+            )
+            quickstepService = services.lineSequence().map { it.trim() }
+                .filter { FOCUSED_COMPONENT.matches(it) }
+                .mapNotNull(ComponentName::unflattenFromString)
+                .filter { it.packageName == recents.packageName }.singleOrNull()
+            check(quickstepService != null) { "Cannot uniquely resolve the system Quickstep service: $services" }
+        }
+        // NavigationModeController publishes secure mode independently of Quickstep's main-thread
+        // callback, which creates the input monitor/receiver and updates its touch regions.
+        // Wait for those observable states, not a delay or a sacrificial/retried navigation swipe.
+        val ready = awaitCondition {
+            refreshBottomServiceDumps()
+            val sysui = dumpFields(lastSystemUiDump)
+            val quickstep = dumpFields(lastQuickstepDump)
+            fun component(value: String?): ComponentName? = value
+                ?.let { FOCUSED_COMPONENT.find(it)?.value }?.let(ComponentName::unflattenFromString)
+            sysui["isConnected"] == "true" && sysui["mIsEnabled"] == "true" &&
+                sysui["mBound"] == "true" && sysui["mCurrentBoundedUserId"] == userId.toString() &&
+                sysui["mNavBarMode"] == "2" &&
+                component(sysui["mRecentsComponentName"])?.packageName == recents.packageName &&
+                quickstep["navigationMode"] == "NO_BUTTON" &&
+                quickstep["isUserUnlocked"] == "true" && quickstep["canStartSystemGesture"] == "true" &&
+                listOf("mInputMonitorCompat", "mInputEventReceiver").all { key ->
+                    quickstep[key]?.let { it.isNotBlank() && it != "null" } == true
+                } && component(quickstep["homeIntent"]) == GESTURE_HOME &&
+                component(quickstep["overviewIntent"]) == recents && quickstep["homeAndOverviewSame"] == "false"
+        }
+        assertTrue("System Home/Overview gesture services did not become ready; ${bottomServiceDiagnostic()}", ready)
+        assertEquals("Waiting for Quickstep changed default HOME", GESTURE_HOME, home.resolveHome())
+    }
+
+    fun injectBottomGesture(description: String, inject: () -> Boolean) {
+        val previousLogId = lastQuickstepDump.substringAfterLast("Logs for logId:", "")
+            .lineSequence().firstOrNull()?.trim().orEmpty().ifEmpty { "none" }
+        val started = SystemClock.uptimeMillis()
+        try {
+            assertTrue("Bottom gesture touch injection failed: $description", inject())
+        } finally {
+            // UiAutomator sleeps at least 5 ms per step, but each synchronous injection also takes
+            // time. Record actual wall duration rather than claiming a fixed fling velocity.
+            lastBottomInput = "$description; startedUptime=$started elapsedMs=${SystemClock.uptimeMillis() - started} logIdBefore=$previousLogId"
+            Log.i(GESTURE_TAG, "Bottom input: $lastBottomInput")
+        }
+    }
+
+    private fun refreshBottomServiceDumps() {
+        lastSystemUiDump = device.executeShellCommand(
+            "dumpsys activity service com.android.systemui/.SystemUIService OverviewProxyService"
+        )
+        quickstepService?.let { service ->
+            lastQuickstepDump = device.executeShellCommand("dumpsys activity service '${service.flattenToString()}'")
+        }
+    }
+
+    private fun dumpFields(dump: String): Map<String, String> = dump.lineSequence().map { it.trim() }
+        .filter { '=' in it }.associate { it.substringBefore('=') to it.substringAfter('=') }
+
+    private fun bottomServiceDiagnostic(): String {
+        val keys = setOf("isConnected", "mIsEnabled", "mBound", "mCurrentBoundedUserId", "mNavBarMode",
+            "mRecentsComponentName", "navigationMode", "isUserUnlocked", "canStartSystemGesture",
+            "systemUiFlagsDesc", "mInputMonitorCompat", "mInputEventReceiver", "homeIntent", "overviewIntent",
+            "homeAndOverviewSame", "rotation", "currentSize", "currentTouchableRotations", "mNavBarGesturalHeight")
+        fun summary(dump: String) = dump.lineSequence().map { it.trim() }
+            .filter { it.substringBefore('=') in keys }.joinToString("; ").ifEmpty { dump.take(350) }
+        val history = lastQuickstepDump.lineSequence().joinToString("\n") { it.trim() }
+            .substringAfter("ActiveGestureLog history:", "")
+            .substringBefore("\nRecentsModel:").substringBefore("\nProtoTrace:")
+        val latestLog = history.substringAfterLast("Logs for logId:", "")
+        val latestLogId = latestLog.lineSequence().firstOrNull()?.trim().orEmpty().ifEmpty { "none" }
+        val latestGesture = latestLog.lineSequence().drop(1).map { it.trim() }.filter { it.isNotBlank() }
+            .toList().takeLast(20).joinToString(" | ").takeLast(1100)
+        val states = "SystemUI=[${summary(lastSystemUiDump)}] Quickstep=$quickstepService [${summary(lastQuickstepDump)}]"
+        // Public CI annotations may truncate at 3,000 characters. Keep input and the last gesture
+        // before bounded state summaries; full service dumps remain in the failure artifacts.
+        return "input=$lastBottomInput latestGesture(logId=$latestLogId)=[$latestGesture] ${states.take(1200)}"
     }
 
     private fun restoreNavigation(savedOverlays: Map<String, String>, savedMode: Int, savedSecureMode: String) {
@@ -402,7 +495,11 @@ private class GesturalNavigationRule(private val home: IsolatedEmulatorHomeRule)
     fun diagnostic(): String = runCatching {
         val focus = device.executeShellCommand("dumpsys window displays").lineSequence()
             .filter { "mCurrentFocus=" in it || "mFocusedApp=" in it }.take(4).joinToString(" ") { it.trim() }
-        "resource=${resourceMode()} secure=${secureMode()} current=${device.currentPackageName} HOME=${home.resolveHome()} focus=$focus"
+        val services = if (quickstepService != null) {
+            refreshBottomServiceDumps()
+            " ${bottomServiceDiagnostic()}"
+        } else ""
+        "resource=${resourceMode()} secure=${secureMode()} current=${device.currentPackageName} HOME=${home.resolveHome()} focus=$focus$services"
     }.getOrElse { "Navigation diagnostic failed: ${it.message}" }
 
     private fun saveFailureArtifacts(description: Description) {
@@ -413,6 +510,10 @@ private class GesturalNavigationRule(private val home: IsolatedEmulatorHomeRule)
             device.takeScreenshot(File(directory, "$prefix.png"))
             device.dumpWindowHierarchy(File(directory, "$prefix.xml"))
             File(directory, "$prefix.txt").writeText(diagnostic() + "\n" + frameworkOverlays())
+            if (quickstepService != null) {
+                File(directory, "$prefix-quickstep.txt").writeText(lastQuickstepDump)
+                File(directory, "$prefix-systemui-overview-proxy.txt").writeText(lastSystemUiDump)
+            }
             Log.e(GESTURE_TAG, "Gesture failure: ${diagnostic()}; files=$directory/$prefix")
         }.onFailure { Log.e(GESTURE_TAG, "Gesture failure evidence capture failed", it) }
     }

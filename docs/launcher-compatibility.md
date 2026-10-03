@@ -16,7 +16,7 @@ v2.1.4 的修复目标是：默认桌面请求能正确反映系统结果；返�
 | 远程构建机 | JDK 17、SDK 34、Build Tools 34.0.0 | v2.1.5 构建成功；58 项测试通过；Lint 0 错误、108 警告；原证书 V1/V2 验证通过 |
 | Robolectric API 24/28/29/34 | Activity、对话框、HOME/角色判断及设置回调 | Main 27、Manager 25、Settings 6，全部通过，无跳过 |
 | 远程 Android 设备 | 实际 Home/Back、SystemUI、锁屏 | 无真机连接；API 34 AOSP 软件模拟器中旧 APK 安装成功，但系统服务频繁 ANR/崩溃，已停止本次尝试并保留 AVD |
-| GitHub KVM / Android 7.0（API 24） | 实际系统授权/取消、Home/Back、抽屉、Activity 销毁及进程终止后的恢复 | 发布提交 `21e1fbb`：11 项设备测试、3 项进程恢复检查全部通过，0 失败、0 跳过 |
+| GitHub KVM / Android 7.0（API 24） | 实际系统授权/取消、Home/Back、抽屉、Activity 销毁及进程终止、熄屏唤醒、重启后的恢复 | 扩展提交 `c2cbeed` 的 11 项设备测试、6 项恢复检查通过；`8429a70` 复跑中设备测试通过，重启后 ADB 丢失，恢复检查未全部完成 |
 | GitHub KVM / Android 14（API 34） | 相同导航、实际系统授权及进程终止后的恢复 | 同一发布提交：11 项设备测试、3 项进程恢复检查全部通过，0 失败、0 跳过 |
 | AOSP / Pixel 真机 | 实际手势、锁屏及升级 | 待实测 |
 | 小米 / HyperOS / MIUI | 按键、全面屏手势、默认桌面入口 | 待实测，尤其关注厂商手势限制 |
@@ -26,9 +26,9 @@ v2.1.4 的修复目标是：默认桌面请求能正确反映系统结果；返�
 
 测试报告与签名验证结果由 GitHub Actions 的 `verification-reports` artifact 保存。构建通过不能标记上表的真机项目为通过。
 
-最终验证来自 [CI 37118600772](https://github.com/GodHu777777/zenlauncher/actions/runs/37118600772)：构建、两个设备任务和发布全部成功，均对应提交 `21e1fbb7833113f9c64de00205c9371e750aac2a`。[v2.1.5 正式 APK](https://github.com/GodHu777777/zenlauncher/releases/tag/v2.1.5) 为 4,912,929 字节，SHA-256 为 `62ea992172ad1624fe7666c1b852968e3d7e356b35b708ca9b19b584acadfce9`；下载后已与 GitHub asset digest 比对。
+v2.1.5 发布验证来自 [CI 37118600772](https://github.com/GodHu777777/zenlauncher/actions/runs/37118600772)：构建、两个设备任务和发布全部成功，均对应提交 `21e1fbb7833113f9c64de00205c9371e750aac2a`。[v2.1.5 正式 APK](https://github.com/GodHu777777/zenlauncher/releases/tag/v2.1.5) 为 4,912,929 字节，SHA-256 为 `62ea992172ad1624fe7666c1b852968e3d7e356b35b708ca9b19b584acadfce9`；下载后已与 GitHub asset digest 比对。
 
-用户所报告的回到原厂桌面问题，仍需具体机型、ROM 版本、触发方式及新版诊断来完成闭环。v2.1.3、v2.1.4 与 v2.1.5 使用相同签名证书，SHA-256 为 `337b92f7bda67e7c2ea553ba969e707257c3d438c3a9320c94f58b3414e7820c`。本轮未把真机、厂商手势、锁屏、重启、配置保留或 Release 覆盖升级标为通过。
+用户所报告的回到原厂桌面问题，仍需具体机型、ROM 版本、触发方式及新版诊断来完成闭环。v2.1.3、v2.1.4 与 v2.1.5 使用相同签名证书，SHA-256 为 `337b92f7bda67e7c2ea553ba969e707257c3d438c3a9320c94f58b3414e7820c`。真机、厂商手势、带密码或生物识别的锁屏、配置保留及 Release 覆盖升级仍待实测；无密码模拟器的恢复验证范围见下文。
 
 ### AOSP 软件模拟尝试的边界
 
@@ -80,6 +80,8 @@ python3 scripts/verify-home-recovery.py --apk app/build/outputs/apk/debug/app-de
 [首轮扩展 CI 37119801236](https://github.com/GodHu777777/zenlauncher/actions/runs/37119801236)（提交 `c2cbeed`）中，API 24 的 11 项设备测试和 6 项恢复检查全部通过。API 34 从系统设置与应用设置上滑均返回 ZenLauncher，但从桌面抽屉上滑进入系统 `com.android.quickstep.RecentsActivity`，导致“立即回主页”的断言失败；实际 HOME 解析仍为 ZenLauncher。API 34 后续恢复检查因该失败未执行。
 
 Android 14 的 [OverviewComponentObserver](https://android.googlesource.com/platform/packages/apps/Launcher3/+/refs/heads/android14-release/quickstep/src/com/android/quickstep/OverviewComponentObserver.java#171) 会在默认 HOME 为第三方桌面时单独使用系统 `RecentsActivity`；该界面不能等同于原厂 HOME。手势终点还受速度和停顿影响，不能把任意上滑都视为 Home。扩展测试因此明确加入“上滑停顿进入系统最近任务，再短上滑回 ZenLauncher”的完整往返；设置页直接 Home 的检查仍然保留。系统 [FallbackNavBarTouchController](https://android.googlesource.com/platform/packages/apps/Launcher3/+/refs/heads/android14-release/quickstep/src/com/android/quickstep/fallback/FallbackNavBarTouchController.java#31) 提供这条回默认 HOME 的路径。此调整需要新的 CI 结果才能标为通过。
+
+[第二轮 CI 37120560464](https://github.com/GodHu777777/zenlauncher/actions/runs/37120560464)（`8429a70`）未全通过：API 24 的 11 项设备测试通过，但重启后模拟器持续未出现在 ADB，恢复阶段超时；API 34 的首次 Settings 上滑没有离开设置，尚未到最近任务往返段。模式资源与 secure setting 已为 2，但这不证明 Quickstep 已完成异步输入监听初始化；下一步需同时核验 SystemUI 连接与实际输入监听，并保留 ActiveGestureLog。ADB 断连也需宿主进程证据定位，不能直接归因于应用崩溃或预先视为环境问题。
 
 ## 真机回归清单
 

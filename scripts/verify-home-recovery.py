@@ -41,6 +41,40 @@ def canonical(component):
     return package + "/" + (package + activity if activity.startswith(".") else activity)
 
 
+def host_transport_diagnostics():
+    """Inspect transport/process availability without reconnecting or restarting anything."""
+    state = {}
+    try:
+        state["adb_devices"] = command(["adb", "devices", "-l"], timeout=5)
+    except Exception as exc:
+        state["adb_devices_error"] = str(exc)[:600]
+    try:
+        output = command(["ps", "-eo", "pid=,ppid=,stat=,comm="], timeout=5)
+        processes = []
+        for line in output.splitlines():
+            fields = line.split(None, 3)
+            if len(fields) != 4:
+                continue
+            name = Path(fields[3]).name
+            if name.lower() == "adb" or name.lower().startswith(("emulator", "qemu")):
+                processes.append(dict(zip(("pid", "ppid", "state", "command"), fields[:3] + [name])))
+        # Command names only: omit arguments and every unrelated host process.
+        state["emulator_adb_processes"] = processes[:20]
+    except Exception as exc:
+        state["process_inspection_error"] = str(exc)[:600]
+    try:
+        with Path("/proc/meminfo").open() as memory_file:
+            memory = memory_file.read(16384)
+        state["memory_kib"] = {
+            key: int(value) for key, value in re.findall(
+                r"^(MemTotal|MemFree|MemAvailable|SwapTotal|SwapFree):\s+(\d+) kB$",
+                memory, re.MULTILINE)
+        }
+    except OSError as exc:
+        state["memory_unavailable"] = str(exc)[:200]
+    return state
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apk", type=Path, required=True)
@@ -153,6 +187,7 @@ def main():
                     state["connection_error"] = str(exc)[:500]
                 report["boot_wait_state"] = state
                 if time.monotonic() >= deadline:
+                    report["host_transport_at_boot_timeout"] = host_transport_diagnostics()
                     raise RuntimeError(f"Timed out waiting for a connected, completed new boot: {state}")
                 time.sleep(1)
 
@@ -232,7 +267,10 @@ def main():
         def navigation_state():
             # Record before restoring stock HOME, so failures retain their actual state.
             # Keep public annotations focused on navigation, without unrelated logcat.
-            state = {"focus_dump_command": " ".join(focus_dump)}
+            transport = report.get("host_transport_at_boot_timeout")
+            if transport is None:
+                transport = host_transport_diagnostics()
+            state = {"focus_dump_command": " ".join(focus_dump), "host_transport": transport}
             try:
                 state["adb_state"] = command(adb + ["get-state"], timeout=5)
             except Exception as exc:

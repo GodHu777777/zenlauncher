@@ -227,13 +227,24 @@ jobs:
             --stacktrace 2>&1 | tee "$evidence/gradle.txt" || test_status=$?
           report_status=0
           python3 build/check-device-results.py "$test_status" "$sdk" || report_status=$?
+          # These host-side checks are independent of the touch-gesture suite.
+          # Run them even after an instrumentation assertion fails, but only if
+          # its fixture really restored the original HOME. Preserve every failure.
+          recovery_status=0
+          restored_home="$(adb shell cmd package resolve-activity --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.HOME | tr -d '\r' | tail -n 1)"
+          if [[ "$restored_home" != "$original_home" ]]; then
+            echo '::error::Instrumentation did not restore stock HOME; independent recovery checks cannot start.'
+            recovery_status=1
+          else
+            python3 scripts/verify-home-recovery.py --apk app/build/outputs/apk/debug/app-debug.apk --output build/device-verification/home-recovery.json || recovery_status=$?
+          fi
           if [[ "$test_status" -ne 0 ]]; then
             exit "$test_status"
           fi
           if [[ "$report_status" -ne 0 ]]; then
             exit "$report_status"
           fi
-          python3 scripts/verify-home-recovery.py --apk app/build/outputs/apk/debug/app-debug.apk --output build/device-verification/home-recovery.json
+          exit "$recovery_status"
           BASH
           cat > build/check-device-results.py <<'PY'
           import pathlib
