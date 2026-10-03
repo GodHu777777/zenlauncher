@@ -3,6 +3,8 @@ package com.zenlauncher.app
 import android.app.Instrumentation
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.graphics.Point
 import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
@@ -67,11 +69,17 @@ class GestureNavigationDeviceTest {
         assertSame("HOME must remove the launcher's Settings page", original, assertHome())
         assertGone("btnSetDefaultLauncher")
 
+        // Third-party HOME and system Overview are separate activities on Android 14.
+        // Deliberately enter Overview, verify its exact component, then navigate HOME once.
+        val recents = systemRecentsComponent()
         waitFor("btnAllApps").click()
-        waitFor("etFilterApps") // A visible dialog provides a second observable HOME control.
+        waitFor("etFilterApps")
+        assertEquals(GESTURE_HOME, home.resolveHome())
+        swipeOverviewAndHold()
+        assertRecents(recents)
         swipeHome()
         assertGone("etFilterApps")
-        assertSame("HOME must close the drawer without replacing the desktop", original, assertHome())
+        assertSame("HOME from Overview must close the drawer and restore the original desktop", original, assertHome())
     }
 
     @Test
@@ -157,8 +165,54 @@ class GestureNavigationDeviceTest {
         navigation.assertGesturalMode()
         val width = device.displayWidth
         val height = device.displayHeight
-        // A continuous bottom-edge fling with no hold triggers HOME, not the overview hold gesture.
+        // A continuous bottom-edge swipe with no hold. Each caller verifies the HOME outcome;
+        // step count alone does not prove how Quickstep classified the release velocity.
         assertTrue("Bottom HOME touch injection failed", device.swipe(width / 2, height - 2, width / 2, height / 3, 24))
+    }
+
+    private fun swipeOverviewAndHold() {
+        navigation.assertGesturalMode()
+        val x = device.displayWidth / 2
+        val endY = device.displayHeight / 3
+        // UiAutomator 2.3 emits MOVE events even between identical points, at least 5 ms apart.
+        // One moving segment followed by six stationary segments keeps the same pointer down
+        // for at least 690 ms at the endpoint, making this an explicit swipe-and-hold gesture.
+        val points = Array(8) { index -> Point(x, if (index == 0) device.displayHeight - 2 else endY) }
+        assertTrue("Overview swipe-and-hold injection failed", device.swipe(points, 24))
+    }
+
+    private fun systemRecentsComponent(): ComponentName {
+        val context = instrumentation.targetContext
+        val resource = context.resources.getIdentifier("config_recentsComponentName", "string", "android")
+        check(resource != 0) { "The API34 emulator does not expose its configured Recents component" }
+        val configured = context.getString(resource)
+        val recentsProvider = requireNotNull(ComponentName.unflattenFromString(configured)) {
+            "Invalid system Recents component: $configured"
+        }
+        // OverviewComponentObserver constructs this fallback class in the Quickstep provider's
+        // package. The framework resource identifies that provider, not necessarily this class.
+        val component = ComponentName(recentsProvider.packageName, "com.android.quickstep.RecentsActivity")
+        val activity = context.packageManager.getActivityInfo(component, 0)
+        assertTrue("The configured Recents activity must be enabled", activity.enabled && activity.applicationInfo.enabled)
+        assertTrue("Recents must belong to a system application", activity.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM != 0)
+        assertFalse("System Recents must be distinct from Zen HOME", component == GESTURE_HOME)
+        return component
+    }
+
+    private fun assertRecents(expected: ComponentName) {
+        device.waitForIdle(GESTURE_TIMEOUT_MS)
+        assertTrue("Swipe-and-hold did not focus the configured system Recents activity; ${navigation.diagnostic()}", awaitCondition {
+            assertEquals("Entering Overview changed default HOME", GESTURE_HOME, home.resolveHome())
+            val windows = device.executeShellCommand("dumpsys window displays").lineSequence().toList()
+            fun componentOnLine(marker: String): ComponentName? = windows.firstOrNull { marker in it }
+                ?.let { FOCUSED_COMPONENT.find(it)?.value }
+                ?.let(ComponentName::unflattenFromString)
+            device.currentPackageName == expected.packageName &&
+                focusedWindowPackage() == expected.packageName &&
+                componentOnLine("mCurrentFocus=") == expected &&
+                componentOnLine("mFocusedApp=") == expected
+        })
+        assertEquals("System Overview changed HOME routing", GESTURE_HOME, home.resolveHome())
     }
 
     private fun swipeBack(fromLeft: Boolean) {
@@ -370,4 +424,5 @@ private const val GESTURAL_OVERLAY = "com.android.internal.systemui.navbar.gestu
 private const val GESTURE_TIMEOUT_MS = 15_000L
 private const val GESTURE_TAG = "ZenGestureNavigationTest"
 private val GESTURE_HOME = ComponentName(GESTURE_APP, "$GESTURE_APP.MainActivity")
+private val FOCUSED_COMPONENT = Regex("[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+")
 private val OVERLAY_LINE = Regex("^(\\[[ x]\\]|---)\\s+([A-Za-z0-9_.]+(?::[A-Za-z0-9_.]+)?)$")

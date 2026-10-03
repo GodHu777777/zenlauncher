@@ -75,7 +75,11 @@ python3 scripts/verify-home-recovery.py --apk app/build/outputs/apk/debug/app-de
 
 下一轮设备验证增加 Android 14 的真实底部上滑 Home 和左右边缘侧滑 Back。先核验系统已启用手势导航，并从系统设置或应用设置实际滑回主页，证明手势识别正常；再持续观察根桌面的返回行为。Android 7 没有这套系统手势，因此明确排除该测试类，原有按键检查继续执行。测试结束时恢复原导航配置和默认桌面。
 
-进程外的恢复检查还将覆盖无密码模拟器的熄屏/唤醒和系统重启：确认屏幕确实进入睡眠、重启前后 boot ID 不同，且不重新设置 ZenLauncher 为默认就能经 Home 回到应用。新检查尚需 CI 实测，不能据此提前将上表标为通过，也不覆盖 PIN、生物识别、厂商 ROM 或同签名升级后的配置保留。
+进程外的恢复检查还覆盖无密码模拟器的熄屏/唤醒和系统重启：确认屏幕确实进入睡眠、重启前后 boot ID 不同，且不重新设置 ZenLauncher 为默认就能经 Home 回到应用。不覆盖 PIN、生物识别、厂商 ROM 或同签名升级后的配置保留。
+
+[首轮扩展 CI 37119801236](https://github.com/GodHu777777/zenlauncher/actions/runs/37119801236)（提交 `c2cbeed`）中，API 24 的 11 项设备测试和 6 项恢复检查全部通过。API 34 从系统设置与应用设置上滑均返回 ZenLauncher，但从桌面抽屉上滑进入系统 `com.android.quickstep.RecentsActivity`，导致“立即回主页”的断言失败；实际 HOME 解析仍为 ZenLauncher。API 34 后续恢复检查因该失败未执行。
+
+Android 14 的 [OverviewComponentObserver](https://android.googlesource.com/platform/packages/apps/Launcher3/+/refs/heads/android14-release/quickstep/src/com/android/quickstep/OverviewComponentObserver.java#171) 会在默认 HOME 为第三方桌面时单独使用系统 `RecentsActivity`；该界面不能等同于原厂 HOME。手势终点还受速度和停顿影响，不能把任意上滑都视为 Home。扩展测试因此明确加入“上滑停顿进入系统最近任务，再短上滑回 ZenLauncher”的完整往返；设置页直接 Home 的检查仍然保留。系统 [FallbackNavBarTouchController](https://android.googlesource.com/platform/packages/apps/Launcher3/+/refs/heads/android14-release/quickstep/src/com/android/quickstep/fallback/FallbackNavBarTouchController.java#31) 提供这条回默认 HOME 的路径。此调整需要新的 CI 结果才能标为通过。
 
 ## 真机回归清单
 
