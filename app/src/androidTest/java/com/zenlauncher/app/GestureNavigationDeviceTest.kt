@@ -4,11 +4,13 @@ import android.app.Instrumentation
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.ApplicationInfo
-import android.graphics.Point
 import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
+import android.view.InputDevice
+import android.view.MotionEvent
+import android.view.VelocityTracker
 import android.view.WindowInsets
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -165,24 +167,14 @@ class GestureNavigationDeviceTest {
         navigation.awaitBottomGestureReady(systemRecentsComponent())
         val width = device.displayWidth
         val height = device.displayHeight
-        // A continuous bottom-edge swipe with no hold. Each caller verifies the HOME outcome;
-        // step count alone does not prove how Quickstep classified the release velocity.
-        navigation.injectBottomGesture("HOME (${width / 2},${height - 2})->(${width / 2},${height / 3}), steps=24") {
-            device.swipe(width / 2, height - 2, width / 2, height / 3, 24)
-        }
+        navigation.injectBottomGesture("HOME", width / 2, height - 2, height / 3)
     }
 
     private fun swipeOverviewAndHold() {
         navigation.awaitBottomGestureReady(systemRecentsComponent())
         val x = device.displayWidth / 2
         val endY = device.displayHeight / 3
-        // UiAutomator 2.3 emits MOVE events even between identical points, at least 5 ms apart.
-        // One moving segment followed by six stationary segments keeps the same pointer down
-        // for at least 690 ms at the endpoint, making this an explicit swipe-and-hold gesture.
-        val points = Array(8) { index -> Point(x, if (index == 0) device.displayHeight - 2 else endY) }
-        navigation.injectBottomGesture("OVERVIEW (${points.first().x},${points.first().y})->($x,$endY), movingSegments=1 holdSegments=6 steps=24") {
-            device.swipe(points, 24)
-        }
+        navigation.injectBottomGesture("OVERVIEW", x, device.displayHeight - 2, endY, holdMillis = 700L)
     }
 
     private fun systemRecentsComponent(): ComponentName {
@@ -270,6 +262,7 @@ private class GesturalNavigationRule(private val home: IsolatedEmulatorHomeRule)
     private var lastQuickstepDump = ""
     private var lastSystemUiDump = ""
     private var lastBottomInput = "none"
+    private var lastBottomEventTrace = ""
 
     override fun apply(base: Statement, description: Description): Statement = object : Statement() {
         override fun evaluate() {
@@ -316,6 +309,8 @@ private class GesturalNavigationRule(private val home: IsolatedEmulatorHomeRule)
     }
 
     fun awaitBottomGestureReady(recents: ComponentName) {
+        // Settle the current page before service readiness and before starting the touch clock.
+        // The public injection API may still synchronize window transactions on DOWN and UP.
         device.waitForIdle(GESTURE_TIMEOUT_MS)
         assertGesturalMode()
         if (quickstepService == null) {
@@ -354,16 +349,110 @@ private class GesturalNavigationRule(private val home: IsolatedEmulatorHomeRule)
         assertEquals("Waiting for Quickstep changed default HOME", GESTURE_HOME, home.resolveHome())
     }
 
-    fun injectBottomGesture(description: String, inject: () -> Boolean) {
+    fun injectBottomGesture(description: String, x: Int, startY: Int, endY: Int, holdMillis: Long = 0L) {
         val previousLogId = lastQuickstepDump.substringAfterLast("Logs for logId:", "")
             .lineSequence().firstOrNull()?.trim().orEmpty().ifEmpty { "none" }
+        val properties = arrayOf(MotionEvent.PointerProperties().apply {
+            id = 0
+            toolType = MotionEvent.TOOL_TYPE_FINGER
+        })
+        val velocity = VelocityTracker.obtain()
+        val trace = StringBuilder("uptimeMs,action,x,y,injectionCallMs,accepted\n")
         val started = SystemClock.uptimeMillis()
+        var previousEventTime = started
+        var pointerEndedAt: Long? = null
+        var maxGapMillis = 0L
+        var moveEvents = 0
+        var currentY = startY.toFloat()
+        var pointerDown = false
+        var releaseVelocity = 0f
+        var failure: Throwable? = null
+
+        fun send(action: Int, y: Float, checkGap: Boolean = true) {
+            // Use real event times. Never backdate events to an ideal schedule when the host stalls.
+            val eventTime = SystemClock.uptimeMillis()
+            val gap = eventTime - previousEventTime
+            maxGapMillis = maxOf(maxGapMillis, gap)
+            if (checkGap) {
+                check(gap <= MAX_BOTTOM_EVENT_GAP_MS) {
+                    "Bottom touch stream stalled for ${gap}ms before ${MotionEvent.actionToString(action)}"
+                }
+            }
+            previousEventTime = eventTime
+            currentY = y
+            val coordinates = arrayOf(MotionEvent.PointerCoords().apply {
+                this.x = x.toFloat()
+                this.y = y
+                pressure = if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) 0f else 1f
+                size = 1f
+            })
+            val event = MotionEvent.obtain(started, eventTime, action, 1, properties, coordinates,
+                0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
+            var accepted = false
+            val callStarted = SystemClock.uptimeMillis()
+            try {
+                velocity.addMovement(event)
+                // CI recorded a 5.7-second swipe and Quickstep detected a pause. That total
+                // includes event-processing waits and DOWN/UP window-transaction waits.
+                // ASYNC removes WAIT_FOR_FINISH for each event, without removing the latter.
+                // Public UiAutomation still synchronizes windows before DOWN and after UP;
+                // the latter wait is outside the pointer's actual down-to-up duration.
+                accepted = home.instrumentation.uiAutomation.injectInputEvent(event, false)
+            } finally {
+                event.recycle()
+                trace.append("$eventTime,${MotionEvent.actionToString(action)},$x,$y,")
+                    .append("${SystemClock.uptimeMillis() - callStarted},$accepted\n")
+            }
+            check(accepted) { "Bottom touch injection rejected ${MotionEvent.actionToString(action)}" }
+            if (action == MotionEvent.ACTION_MOVE) moveEvents++
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                pointerDown = false
+                pointerEndedAt = eventTime
+            }
+        }
+
+        fun waitUntilEventTime(deadline: Long) {
+            val remaining = deadline - SystemClock.uptimeMillis()
+            if (remaining > 0) SystemClock.sleep(remaining)
+        }
+
         try {
-            assertTrue("Bottom gesture touch injection failed: $description", inject())
+            pointerDown = true
+            send(MotionEvent.ACTION_DOWN, currentY)
+            do {
+                waitUntilEventTime(minOf(previousEventTime + BOTTOM_EVENT_INTERVAL_MS, started + BOTTOM_MOVE_MS))
+                val fraction = ((SystemClock.uptimeMillis() - started).toFloat() / BOTTOM_MOVE_MS).coerceAtMost(1f)
+                send(MotionEvent.ACTION_MOVE, startY + (endY - startY) * fraction)
+            } while (fraction < 1f)
+            check(moveEvents >= 3) { "Too few events for a continuous bottom swipe: $moveEvents" }
+            if (holdMillis > 0) {
+                // These stationary MOVE events deliberately keep the same finger down. This is
+                // part of the Overview gesture, not a delay inserted to hide application timing.
+                val releaseAt = previousEventTime + holdMillis
+                while (SystemClock.uptimeMillis() < releaseAt) {
+                    waitUntilEventTime(minOf(previousEventTime + BOTTOM_EVENT_INTERVAL_MS, releaseAt))
+                    send(MotionEvent.ACTION_MOVE, endY.toFloat())
+                }
+            }
+            send(MotionEvent.ACTION_UP, endY.toFloat())
+            velocity.computeCurrentVelocity(1000)
+            releaseVelocity = velocity.yVelocity / 1000f
+        } catch (error: Throwable) {
+            failure = error
+            throw error
         } finally {
-            // UiAutomator sleeps at least 5 ms per step, but each synchronous injection also takes
-            // time. Record actual wall duration rather than claiming a fixed fling velocity.
-            lastBottomInput = "$description; startedUptime=$started elapsedMs=${SystemClock.uptimeMillis() - started} logIdBefore=$previousLogId"
+            if (pointerDown) {
+                try {
+                    send(MotionEvent.ACTION_CANCEL, currentY, checkGap = false)
+                } catch (cancelError: Throwable) {
+                    failure?.addSuppressed(cancelError)
+                }
+            }
+            velocity.recycle()
+            lastBottomEventTrace = trace.toString()
+            lastBottomInput = "$description ($x,$startY)->($x,$endY) moveMs=$BOTTOM_MOVE_MS holdMs=$holdMillis; " +
+                "pointerMs=${pointerEndedAt?.minus(started)} wallMs=${SystemClock.uptimeMillis() - started} " +
+                "maxGapMs=$maxGapMillis moves=$moveEvents releaseYpxPerMs=$releaseVelocity logIdBefore=$previousLogId"
             Log.i(GESTURE_TAG, "Bottom input: $lastBottomInput")
         }
     }
@@ -515,6 +604,7 @@ private class GesturalNavigationRule(private val home: IsolatedEmulatorHomeRule)
             if (quickstepService != null) {
                 File(directory, "$prefix-quickstep.txt").writeText(lastQuickstepDump)
                 File(directory, "$prefix-systemui-overview-proxy.txt").writeText(lastSystemUiDump)
+                File(directory, "$prefix-input-events.csv").writeText(lastBottomEventTrace)
             }
             Log.e(GESTURE_TAG, "Gesture failure: ${diagnostic()}; files=$directory/$prefix")
         }.onFailure { Log.e(GESTURE_TAG, "Gesture failure evidence capture failed", it) }
@@ -525,6 +615,9 @@ private const val GESTURE_APP = "com.zenlauncher.app"
 private const val GESTURE_SYSTEM_SETTINGS = "com.android.settings"
 private const val GESTURAL_OVERLAY = "com.android.internal.systemui.navbar.gestural"
 private const val GESTURE_TIMEOUT_MS = 15_000L
+private const val BOTTOM_MOVE_MS = 160L
+private const val BOTTOM_EVENT_INTERVAL_MS = 8L
+private const val MAX_BOTTOM_EVENT_GAP_MS = 80L
 private const val GESTURE_TAG = "ZenGestureNavigationTest"
 private val GESTURE_HOME = ComponentName(GESTURE_APP, "$GESTURE_APP.MainActivity")
 private val FOCUSED_COMPONENT = Regex("[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+")

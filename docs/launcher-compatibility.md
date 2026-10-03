@@ -13,11 +13,12 @@ v2.1.4 的修复目标是：默认桌面请求能正确反映系统结果；返�
 | 环境 | 可验证内容 | 当前状态 |
 | --- | --- | --- |
 | 本地 macOS | 源码与 Git 状态 | 无可用 JDK、Android SDK、adb、模拟器 |
-| 远程构建机 | JDK 17、SDK 34、Build Tools 34.0.0 | v2.1.5 构建成功；58 项测试通过；Lint 0 错误、108 警告；原证书 V1/V2 验证通过 |
-| Robolectric API 24/28/29/34 | Activity、对话框、HOME/角色判断及设置回调 | Main 27、Manager 25、Settings 6，全部通过，无跳过 |
+| 远程构建机 | JDK 17、SDK 34、Build Tools 34.0.0 | v2.1.6 候选包构建成功；74 项测试通过；Lint 0 错误、108 警告；原证书 V1/V2 验证通过；设备发布门禁待完成 |
+| Robolectric API 24/28/29/34 | Activity、对话框、HOME/角色判断、设置回调及跨用户失败 | Main 27、DefaultLauncherManager 25、Settings 6、AppManagerProfile 16，全部通过，无跳过；新增 profile 用例运行于 API 24/34 |
 | 远程 Android 设备 | 实际 Home/Back、SystemUI、锁屏 | 无真机连接；API 34 AOSP 软件模拟器中旧 APK 安装成功，但系统服务频繁 ANR/崩溃，已停止本次尝试并保留 AVD |
-| GitHub KVM / Android 7.0（API 24） | 实际系统授权/取消、Home/Back、抽屉、Activity 销毁及进程终止、熄屏唤醒、重启后的恢复 | 扩展提交 `c2cbeed` 的 11 项设备测试、6 项恢复检查通过；`8429a70` 复跑中设备测试通过，重启后 ADB 丢失，恢复检查未全部完成 |
-| GitHub KVM / Android 14（API 34） | 相同导航、实际系统授权及进程终止后的恢复 | 同一发布提交：11 项设备测试、3 项进程恢复检查全部通过，0 失败、0 跳过 |
+| GitHub KVM / Android 7.0（API 24） | 实际系统授权/取消、Home/Back、抽屉、Activity 销毁及进程终止、熄屏唤醒、重启后的恢复 | `ad87321` 的 11 项设备测试、6 项恢复检查全部通过，0 失败、0 跳过；此前曾出现模拟器重启退出，保留记录如下 |
+| GitHub KVM / Android 14（API 34） | 相同导航、实际系统授权、进程终止、熄屏唤醒和重启后的恢复 | v2.1.5 发布提交的 11 项设备测试和 3 项恢复检查通过；`ad87321` 的 6 项扩展恢复检查全部通过，但底部 Home 手势测试未通过 |
+| GitHub KVM / 正式 APK 覆盖升级 | 线上 v2.1.3 → 同签名 Release 候选包，默认 HOME、配置和返回 | `2ce0a55` 上 API 24 的 2.1.3 → 2.1.5 全通过；API 34 在旧版默认桌面设置阶段超时，未开始覆盖升级 |
 | AOSP / Pixel 真机 | 实际手势、锁屏及升级 | 待实测 |
 | 小米 / HyperOS / MIUI | 按键、全面屏手势、默认桌面入口 | 待实测，尤其关注厂商手势限制 |
 | 华为 / EMUI（支持 APK） | 默认桌面与系统导航 | 待实测 |
@@ -87,13 +88,29 @@ Android 14 的 [OverviewComponentObserver](https://android.googlesource.com/plat
 
 [第四轮 CI 37122326563](https://github.com/GodHu777777/zenlauncher/actions/runs/37122326563)（`87eedd2`）在运行器内提前返回 127，没有产生新的设备测试或恢复结果。模拟器二进制的裸 `-version` 查询也会启动后端，不能假设它与无窗口运行使用相同依赖；版本采集现改为读取已安装 SDK 的 `source.properties`，避免额外启动进程。同时增加运行脚本的失败行号与具体命令提示。日志重定向已按运行器实际参数解析方式在本地验证；此轮 127 的具体失败命令尚未由现场日志确认。
 
+[第五轮 CI 37122978604](https://github.com/GodHu777777/zenlauncher/actions/runs/37122978604)（`ad87321`）确认两端 Emulator 均为 37.2.12。API 24 的 11 项设备测试与 6 项恢复检查全过；API 34 的 6 项恢复检查也全过，包括真实重启。API 34 的底部 Home 测试仍失败：24 步 `UiDevice.swipe` 实际持续 5711 ms，Quickstep 记录 `onMotionPauseChanged paused=true`、`setEndTarget RECENTS`，最终焦点是系统 `RecentsActivity`；HOME 解析仍为 ZenLauncher。这给出了触摸时序与系统判定的直接证据，下一步需用可控的连续触屏事件验证 Home，保持原有导航结果断言。
+
+当前手势测试已改为按真实时钟发送一次连续触屏上滑，Home 移动目标 160 ms，Overview 另保持同一触点 700 ms。每事件检查注入结果及停顿，记录逐事件时间，并区分指针按下到抬起与 API 调用（含窗口事务等待）的总耗时；没有回填时间戳、重复手势或按键替代。该代码已编译，新的设备结果仍待验证。
+
+后续 `2ce0a55` 的 API 24 导航测试仍全过，但重启再次出现宿主 emulator/qemu 退出，日志含图形上下文错误 `12297`。相关图形日志也可能来自退出清理，不能凭此判定根因；当前保留渲染器不变，并让 CI 以非交互、只读 `sudo -n dmesg` 收集有限的模拟器/OOM/崩溃相关行，补足此前无权限的内核证据。
+
 ### 正式 APK 覆盖升级验证
 
-独立工作流 `verify-release-upgrade.yml` 在相关源码、构建文件或验证脚本推送到 `main` 时运行，也支持手动启动。它使用全新 API 24 / 34 模拟器，先安装 GitHub 正式 v2.1.3，再以 `adb install -r` 安装该提交使用永久密钥构建的 Release。两包的实际版本号、非 Debug 属性、V1/V2 和证书均先校验；候选包只作为测试产物，不覆盖已发布版本。
+工作流 `verify-release-upgrade.yml` 由主构建调用，也支持手动启动。主构建传入将用于发布的同一个 APK artifact；手动运行才独立构建候选包。它使用全新 API 24 / 34 模拟器，先安装 GitHub 正式 v2.1.3，再以 `adb install -r` 安装候选 Release。两包的实际版本号、非 Debug 属性、V1/V2 和证书均先校验。升级验证成为发布前的必过项，与导航测试共同约束发布；验证本身不创建或覆盖已发布版本。
 
 正式 v2.1.3 资产的 SHA-256 为 `6d892040ddfe6c34fc3caba336d2d98fd24b154be487681ba8aabbaefb55be5b`，已下载并与 GitHub asset digest 对照，同时实际验证版本 213、原证书及 V1/V2。用户本地同版本构建的 SHA-256 不同，因此测试明确固定线上正式资产。
 
-`scripts/verify-release-upgrade.py` 通过真实设置界面保存唯一标语，先验证旧版本强停后的持久化，再在系统设置前台覆盖升级。升级后不重设 ZenLauncher HOME、不恢复配置、不显式启动主界面，检查实际 HOME 解析、系统 Home 按键、新进程、标语和根返回行为。测试拒绝已有安装或残留数据，结束时恢复系统桌面并保留升级后的应用数据。报告保存于 `signed-release-upgrade-api-24-evidence` / `signed-release-upgrade-api-34-evidence`；新增流程尚待首次设备结果，不能仅凭脚本存在认定覆盖升级已通过。
+`scripts/verify-release-upgrade.py` 通过真实设置界面保存唯一标语，先验证旧版本强停后的持久化，再在系统设置前台覆盖升级。升级后不重设 ZenLauncher HOME、不恢复配置、不显式启动主界面，检查实际 HOME 解析、系统 Home 按键、新进程、标语和根返回行为。测试拒绝已有安装或残留数据，结束时恢复系统桌面并保留升级后的应用数据。报告保存于 `signed-release-upgrade-api-24-evidence` / `signed-release-upgrade-api-34-evidence`。
+
+[首轮正式升级 CI 37123259842](https://github.com/GodHu777777/zenlauncher/actions/runs/37123259842)（`2ce0a55`）中，API 24 的 2.1.3 → 2.1.5 全流程通过。API 34 在旧版初始 `set-home-activity` 阶段超出 15 秒，尚未开始升级，不能记为升级保留成功或失败。同期主 CI 的 API 34 捕获到仍在初始化的 `com.google.android.googlesdksetup/.DefaultActivity` 作为原 HOME，该临时组件随后消失；需要在安装/测试之前验证初始设置完成且持久系统桌面已就绪。
+
+两条流程现共用 `prepare-fresh-emulator.py`：等待系统配置完成、同一前台用户已解锁、安装启用的系统 HOME 与实际焦点及角色一致，并连续稳定至少 5 秒，再允许安装。准备阶段不写配置完成标志、不指定默认 HOME、不重跑测试。旧版首次桌面设置只允许一次最长 60 秒的命令并记录耗时；升级后的结果检查和零次重设 ZenLauncher HOME 的要求不变。
+
+### v2.1.6 候选修复：分身失败时保留用户范围
+
+此前 `LauncherApps` 打开分身或工作资料失败后，会使用当前用户的 `PackageManager` 打开同包应用，应用详情也存在相同回退。候选修复仅对当前用户应用保留这种回退；其他用户句柄、分身标记或非零用户序号的请求失败时返回失败，详情页同时给出提示，不转而操作个人应用。
+
+新增 8 项 Robolectric 用例分别在 API 24/34 运行，以真实可解析的个人同包应用作为回退目标，覆盖不可访问的资料、服务缺失、句柄缺失、标记不一致、成功跨用户请求及正常个人应用回退。16 项新增测试与原有 58 项均通过；尚不能据此声明厂商分身或暂停工作资料的真机流程已经验证。
 
 ## 真机回归清单
 

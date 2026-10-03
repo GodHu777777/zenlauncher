@@ -1,17 +1,14 @@
 name: Verify Signed Release Upgrade
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/verify-release-upgrade.yml'
-      - 'scripts/verify-release-upgrade.py'
-      - 'app/**'
-      - '*.gradle'
-      - 'gradle.properties'
-      - 'gradle/**'
-      - 'gradlew*'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      candidate_artifact:
+        description: APK artifact from the caller build in this workflow run; empty builds a candidate.
+        type: string
+        required: false
+        default: ''
 
 # This workflow builds evidence only. It never creates or replaces a release/tag.
 permissions:
@@ -40,6 +37,7 @@ jobs:
           java-version: '17'
 
       - name: Set up Gradle
+        if: inputs.candidate_artifact == ''
         uses: gradle/actions/setup-gradle@v4
 
       - name: Install Required Android Build Tools
@@ -61,13 +59,37 @@ jobs:
           printf '%s\n' "$url" > build/release-upgrade-build/old-release-url.txt
 
       - name: Build Candidate Release with Permanent Keystore
+        if: inputs.candidate_artifact == ''
         shell: bash
         run: |
           chmod +x ./gradlew
           ./gradlew assembleRelease --stacktrace 2>&1 | tee build/release-upgrade-build/gradle-release.log
           cp app/build/outputs/apk/release/app-release.apk build/release-upgrade-apks/new-release.apk
 
+      - name: Download Exact APK from the Caller Build
+        if: inputs.candidate_artifact != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.candidate_artifact }}
+          path: build/main-build-candidate
+
+      - name: Select the Caller APK without Rebuilding
+        if: inputs.candidate_artifact != ''
+        shell: bash
+        run: |
+          python3 -B - <<'PY'
+          from pathlib import Path
+          import shutil
+
+          files = list(Path('build/main-build-candidate').iterdir())
+          if len(files) != 1 or not files[0].is_file() or files[0].suffix != '.apk':
+              raise SystemExit('The caller artifact must contain exactly one APK.')
+          shutil.copyfile(files[0], 'build/release-upgrade-apks/new-release.apk')
+          PY
+
       - name: Verify Actual APK Versions and Signatures
+        env:
+          CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
         shell: bash
         run: |
           python3 -B - <<'PY'
@@ -100,6 +122,8 @@ jobs:
               'workflow_run': os.environ['GITHUB_SERVER_URL'] + '/' + os.environ['GITHUB_REPOSITORY']
                               + '/actions/runs/' + os.environ['GITHUB_RUN_ID'],
               'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'candidate_source': 'caller_artifact' if os.environ['CANDIDATE_ARTIFACT'] else 'assembleRelease',
+              'candidate_artifact': os.environ['CANDIDATE_ARTIFACT'] or None,
               'old_release_url': Path('build/release-upgrade-build/old-release-url.txt').read_text().strip(),
               'old_apk': old,
               'new_apk': new,
@@ -116,6 +140,7 @@ jobs:
               summary.write(f"Candidate `{commit}`: signed Release {old['version_name']} "
                             f"({old['version_code']}) → {new['version_name']} ({new['version_code']}).\n\n"
                             f"Candidate SHA-256: `{new['sha256']}`.\n\n"
+                            f"Candidate source: `{report['candidate_artifact'] or 'assembleRelease'}`.\n\n"
                             'Both APKs passed V1/V2 and permanent-certificate verification. '
                             'The candidate is a workflow artifact; published versions are untouched.\n')
           PY
@@ -236,6 +261,7 @@ jobs:
           if [[ -r "$ANDROID_HOME/emulator/source.properties" ]]; then
             cp "$ANDROID_HOME/emulator/source.properties" "$evidence/emulator-source.properties"
           fi
+          python3 -B scripts/prepare-fresh-emulator.py --output "$evidence/fresh-emulator.json"
           # No instrumentation/debug installation or cached AVD is used in this job.
           # The verifier rejects any existing package or retained data before mutation.
           python3 -B scripts/verify-release-upgrade.py \

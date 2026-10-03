@@ -8,6 +8,7 @@ Sleep/wake and reboot coverage uses an emulator without a PIN or biometric lock.
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -67,9 +68,13 @@ def host_transport_diagnostics():
     except Exception as exc:
         state["process_inspection_error"] = str(exc)[:600]
     try:
-        kernel = subprocess.run(["dmesg"], text=True, capture_output=True, timeout=5)
+        # GitHub-hosted runners restrict kernel reads to root. Non-interactive
+        # sudo is limited to that CI environment and this read-only diagnostic.
+        kernel_command = ["sudo", "-n", "dmesg"] if os.environ.get("GITHUB_ACTIONS") == "true" else ["dmesg"]
+        state["kernel_log_command"] = kernel_command
+        kernel = subprocess.run(kernel_command, text=True, capture_output=True, timeout=5)
         if kernel.returncode:
-            state["kernel_log_error"] = f"dmesg exit {kernel.returncode}: {kernel.stderr.strip()[:500]}"
+            state["kernel_log_error"] = f"{' '.join(kernel_command)} exit {kernel.returncode}: {kernel.stderr.strip()[:500]}"
         else:
             relevant = re.compile(r"emulator|qemu|\boom(?:[_:-]|\b)|out of memory|killed process|segfault", re.IGNORECASE)
             state["kernel_log_lines"] = [line[:600] for line in kernel.stdout.splitlines()

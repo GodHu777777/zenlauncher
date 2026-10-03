@@ -167,8 +167,8 @@ def main(argv=None):
             require(len(matches) == 1, f"Cannot resolve one HOME: {output!r}")
             return canonical(matches[0])
 
-        def set_home(component):
-            shell("cmd", "package", "set-home-activity", "--user", user, component)
+        def set_home(component, timeout=15):
+            shell("cmd", "package", "set-home-activity", "--user", user, component, timeout=timeout)
             eventually("HOME assignment " + component, lambda: resolve_home() == canonical(component))
 
         def assert_default():
@@ -317,7 +317,15 @@ def main(argv=None):
         cleanup_needed = True  # Installing a HOME candidate can itself clear the old HOME selection.
         install(args.old_apk, replace=False)
         report["installed_old"] = installed_version(old)
-        set_home(HOME)  # The ONLY assignment of Zen HOME in this test.
+        # Android 14 runSetHomeActivity waits on RoleManager's asynchronous future.get().
+        # Give this initial fixture command one bounded 60s attempt; this does not
+        # change any post-upgrade assertion or permit a second Zen HOME assignment.
+        assignment_started = time.monotonic()
+        report["initial_home_assignment_timeout_seconds"] = 60
+        try:
+            set_home(HOME, timeout=60)  # The ONLY assignment of Zen HOME in this test.
+        finally:
+            report["initial_home_assignment_seconds"] = round(time.monotonic() - assignment_started, 3)
         home_key()
         stable_home("initial old Release HOME")
         edit = open_motto_dialog()

@@ -211,16 +211,18 @@ jobs:
             emulator_revision="$(sed -n 's/^Pkg.Revision[[:space:]]*=[[:space:]]*//p' "$evidence/emulator-source.properties")"
             echo "::notice title=Emulator runtime::SDK emulator package revision: $emulator_revision"
           fi
+          python3 -B scripts/prepare-fresh-emulator.py --output "$evidence/fresh-emulator.json"
           # Set an explicit stock HOME before Gradle installs a second HOME candidate.
           # The instrumentation fixture can then restore a known choice after each test.
-          original_home="$(adb shell cmd package resolve-activity --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.HOME | tr -d '\r' | tail -n 1)"
+          original_home="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["original_home"])' "$evidence/fresh-emulator.json")"
+          original_user="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["user"])' "$evidence/fresh-emulator.json")"
           printf '%s\n' "$original_home" > "$evidence/initial-home.txt"
           if [[ ! "$original_home" =~ ^[a-zA-Z0-9_.]+/[a-zA-Z0-9_.$]+$ || "$original_home" == android/* || "$original_home" == com.zenlauncher.app/* ]]; then
             echo '::error::The fresh emulator has no unambiguous stock HOME to restore.'
             exit 1
           fi
-          adb shell cmd package set-home-activity --user 0 "$original_home" | tee "$evidence/set-initial-home.txt"
-          restored_home="$(adb shell cmd package resolve-activity --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.HOME | tr -d '\r' | tail -n 1)"
+          timeout 60s adb shell cmd package set-home-activity --user "$original_user" "$original_home" | tee "$evidence/set-initial-home.txt"
+          restored_home="$(adb shell cmd package resolve-activity --brief --user "$original_user" -a android.intent.action.MAIN -c android.intent.category.HOME | tr -d '\r' | tail -n 1)"
           if [[ "$restored_home" != "$original_home" ]]; then
             echo '::error::The emulator did not retain its explicit stock HOME choice.'
             exit 1
@@ -252,7 +254,7 @@ jobs:
           # Run them even after an instrumentation assertion fails, but only if
           # its fixture really restored the original HOME. Preserve every failure.
           recovery_status=0
-          restored_home="$(adb shell cmd package resolve-activity --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.HOME | tr -d '\r' | tail -n 1)"
+          restored_home="$(adb shell cmd package resolve-activity --brief --user "$original_user" -a android.intent.action.MAIN -c android.intent.category.HOME | tr -d '\r' | tail -n 1)"
           if [[ "$restored_home" != "$original_home" ]]; then
             echo '::error::Instrumentation did not restore stock HOME; independent recovery checks cannot start.'
             recovery_status=1
@@ -361,9 +363,16 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  release_upgrade:
+    name: Verify the Release APK Upgrade
+    needs: build
+    uses: ./.github/workflows/verify-release-upgrade.yml
+    with:
+      candidate_artifact: ZenLauncher-v${{ needs.build.outputs.version }}-native-apk
+
   release:
     name: Publish Validated Version
-    needs: [build, emulator]
+    needs: [build, emulator, release_upgrade]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -406,7 +415,7 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           body: |
-            安装包已通过单元测试、Android 7.0 / 14 模拟器导航测试、Android Lint 和统一签名校验（V1 + V2）。
+            安装包已通过单元测试、Android 7.0 / 14 模拟器导航测试、同签名覆盖升级验证、Android Lint 和统一签名校验（V1 + V2）。
             更新前可在设置中备份配置；使用与此前官方版本相同的签名覆盖安装。
 
             默认桌面由 Android 系统的 HOME 角色/默认应用设置决定。部分厂商对第三方桌面和全面屏手势另有限制，自动化通过不代表所有设备均已验证。
