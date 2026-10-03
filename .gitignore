@@ -29,6 +29,13 @@
 /build/
 
 # Android related
+.gradle/
+**/build/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+build_output/
 **/android/.gradle
 **/android/captures/
 **/android/local.properties

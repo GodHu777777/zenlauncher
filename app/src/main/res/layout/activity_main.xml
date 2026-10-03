@@ -4,7 +4,8 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/black"
-    android:fitsSystemWindows="true">
+    android:focusable="true"
+    android:focusableInTouchMode="true">
 
     <!-- Top Action Bar -->
     <ImageButton
@@ -21,15 +22,20 @@
         app:tint="@color/text_secondary" />
 
     <!-- Center Content: Normal Home View -->
-    <LinearLayout
+    <androidx.core.widget.NestedScrollView
         android:id="@+id/layoutNormalHome"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:orientation="vertical"
-        android:paddingStart="28dp"
-        android:paddingEnd="28dp"
+        android:fillViewport="true"
         app:layout_constraintBottom_toTopOf="@id/layoutBottomArea"
         app:layout_constraintTop_toBottomOf="@id/btnSettings">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="28dp"
+            android:paddingEnd="28dp">
 
         <!-- Subtle Reminder Banner if not set as Default Launcher -->
         <LinearLayout
@@ -47,11 +53,12 @@
             android:visibility="gone">
 
             <TextView
+                android:id="@+id/tvDefaultLauncherBanner"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:lineSpacingExtra="2dp"
-                android:text="当前未设为系统默认桌面，按返回或锁屏易跳回系统桌面"
+                android:text="当前未设为默认桌面，请设置后按 Home 验证"
                 android:textColor="@color/amber_accent"
                 android:textSize="12sp" />
 
@@ -150,7 +157,8 @@
             android:layout_marginBottom="24dp"
             android:nestedScrollingEnabled="false" />
 
-    </LinearLayout>
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
 
     <!-- Center Content: Search Results View (Shown when searching) -->
     <androidx.recyclerview.widget.RecyclerView
@@ -204,6 +212,7 @@
 
             <ImageButton
                 android:id="@+id/btnClearSearch"
+                android:contentDescription="清除搜索"
                 android:layout_width="28dp"
                 android:layout_height="28dp"
                 android:background="?attr/selectableItemBackgroundBorderless"

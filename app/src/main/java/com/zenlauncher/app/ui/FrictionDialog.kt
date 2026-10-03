@@ -1,6 +1,6 @@
 package com.zenlauncher.app.ui
 
-import android.app.Dialog
+import androidx.activity.ComponentDialog
 import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
@@ -18,7 +18,7 @@ class FrictionDialog(
     private val totalSeconds: Int,
     private val promptText: String,
     private val onConfirmed: () -> Unit
-) : Dialog(context) {
+) : ComponentDialog(context) {
 
     private var countDownTimer: CountDownTimer? = null
 
@@ -27,7 +27,9 @@ class FrictionDialog(
         requestWindowFeature(Window.FEATURE_NO_TITLE)
         setContentView(R.layout.dialog_friction)
         window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-        setCancelable(false)
+        // Back means abandoning the launch; it must not trap the user in a countdown.
+        setCancelable(true)
+        setCanceledOnTouchOutside(false)
 
         val tvTitle = findViewById<TextView>(R.id.tvFrictionTitle)
         val tvPrompt = findViewById<TextView>(R.id.tvFrictionPrompt)

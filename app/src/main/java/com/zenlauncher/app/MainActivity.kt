@@ -1,5 +1,6 @@
 package com.zenlauncher.app
 
+import android.app.Dialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.LauncherApps
@@ -11,7 +12,6 @@ import android.os.UserHandle
 import android.provider.CalendarContract
 import android.text.Editable
 import android.text.TextWatcher
-import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -20,6 +20,8 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -27,12 +29,14 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.zenlauncher.app.databinding.ActivityMainBinding
 import com.zenlauncher.app.manager.AppManager
+import com.zenlauncher.app.manager.DefaultLauncherManager
 import com.zenlauncher.app.manager.CalendarManager
 import com.zenlauncher.app.manager.PrefManager
 import com.zenlauncher.app.model.AppInfo
 import com.zenlauncher.app.ui.AppAdapter
 import com.zenlauncher.app.ui.CalendarAdapter
 import com.zenlauncher.app.ui.FrictionDialog
+import com.zenlauncher.app.ui.DefaultLauncherSetup
 import com.zenlauncher.app.util.PinyinSearchEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -52,12 +56,23 @@ class MainActivity : AppCompatActivity() {
     private lateinit var calendarAdapter: CalendarAdapter
     private var launcherAppsCallback: LauncherApps.Callback? = null
     private var calendarObserver: ContentObserver? = null
+    private val homeDialogs = mutableSetOf<Dialog>()
+    private val launcherSetup = DefaultLauncherSetup(this) { updateDefaultLauncherBanner() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { view, insets ->
+            val safe = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            view.setPadding(safe.left, safe.top, safe.right, maxOf(safe.bottom, ime.bottom))
+            insets
+        }
+        ViewCompat.requestApplyInsets(binding.root)
 
         pref = PrefManager(this)
 
@@ -79,8 +94,11 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
-        clearSearch()
-        hideKeyboard()
+        if (intent?.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_HOME)) {
+            dismissHomeDialogs()
+            clearSearch()
+            binding.layoutNormalHome.scrollTo(0, 0)
+        }
     }
 
     private fun setupAdapters() {
@@ -123,8 +141,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnSetDefaultQuick.setOnClickListener {
-            AppManager.openDefaultLauncherSettings(this)
-            showDefaultLauncherGuideDialog()
+            launcherSetup.requestDefault()
         }
 
         binding.btnAllApps.setOnClickListener {
@@ -194,6 +211,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        dismissHomeDialogs()
         super.onDestroy()
         launcherAppsCallback?.let {
             val launcherApps = getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
@@ -303,13 +321,19 @@ class MainActivity : AppCompatActivity() {
                 promptText = "停顿 ${pref.getFrictionSeconds()} 秒。\n确认这是你真正想做的事，还是下意识的习惯？",
                 onConfirmed = {
                     clearSearch()
-                    AppManager.launchApp(this, app)
+                    launchApp(app)
                 }
             )
-            dialog.show()
+            showHomeDialog(dialog)
         } else {
             clearSearch()
-            AppManager.launchApp(this, app)
+            launchApp(app)
+        }
+    }
+
+    private fun launchApp(app: AppInfo) {
+        if (!AppManager.launchApp(this, app)) {
+            Toast.makeText(this, "无法打开应用，它可能已停用或所属用户空间不可用", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -323,7 +347,7 @@ class MainActivity : AppCompatActivity() {
             "系统应用详情 / 卸载"
         )
 
-        AlertDialog.Builder(this)
+        showHomeDialog(AlertDialog.Builder(this)
             .setTitle(title)
             .setItems(items) { _, which ->
                 when (which) {
@@ -343,7 +367,7 @@ class MainActivity : AppCompatActivity() {
                     4 -> AppManager.openAppInfo(this, app)
                 }
             }
-            .show()
+            .create())
     }
 
     private fun showRenameDialog(app: AppInfo) {
@@ -354,7 +378,7 @@ class MainActivity : AppCompatActivity() {
             setSelection(text.length)
         }
 
-        AlertDialog.Builder(this)
+        showHomeDialog(AlertDialog.Builder(this)
             .setTitle("重命名「$label」")
             .setView(et)
             .setPositiveButton("保存") { _, _ ->
@@ -363,7 +387,7 @@ class MainActivity : AppCompatActivity() {
                 loadApps()
             }
             .setNegativeButton("取消", null)
-            .show()
+            .create())
     }
 
     private fun showAllAppsBottomSheet() {
@@ -405,7 +429,19 @@ class MainActivity : AppCompatActivity() {
             override fun afterTextChanged(s: Editable?) {}
         })
 
+        showHomeDialog(dialog)
+    }
+
+    private fun showHomeDialog(dialog: Dialog) {
+        homeDialogs.add(dialog)
+        dialog.setOnDismissListener { homeDialogs.remove(dialog) }
         dialog.show()
+    }
+
+    private fun dismissHomeDialogs() {
+        homeDialogs.toList().forEach { it.dismiss() }
+        homeDialogs.clear()
+        launcherSetup.dismiss()
     }
 
     private fun setupBackPressHandler() {
@@ -417,97 +453,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleBackAction() {
-        if (binding.etSearch.text.isNotEmpty() || binding.rvSearchResults.visibility == View.VISIBLE) {
-            clearSearch()
-        } else {
-            // Root desktop: DO NOTHING!
-            // A home launcher must NEVER finish or return to system launcher on back press/gesture.
-            // Consuming the back event guarantees ZenLauncher stays active.
-        }
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        handleBackAction()
-    }
-
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_BACK) {
-            handleBackAction()
-            return true
-        }
-        return super.onKeyDown(keyCode, event)
+        // The IME/dialog handles Back first; the desktop itself must never finish.
+        clearSearch()
     }
 
     private fun hideKeyboard() {
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
         imm?.hideSoftInputFromWindow(binding.etSearch.windowToken, 0)
         binding.etSearch.clearFocus()
+        binding.root.requestFocus()
     }
 
     private fun updateDefaultLauncherBanner() {
-        val isDefault = AppManager.isDefaultLauncher(this)
-        binding.layoutSetDefaultBanner.visibility = if (isDefault) View.GONE else View.VISIBLE
+        val status = DefaultLauncherManager.getStatus(this)
+        binding.layoutSetDefaultBanner.visibility = if (status.isDefault) View.GONE else View.VISIBLE
+        binding.tvDefaultLauncherBanner.text = status.summary + "，请设置后按 Home 验证"
     }
 
-    private fun showDefaultLauncherGuideDialog() {
-        val options = arrayOf(
-            "1. 清除「系统桌面」默认值 (最推荐·必成功)",
-            "2. 切换导航方式为经典按键 (解锁菜单)",
-            "3. 打开系统默认应用设置页",
-            "4. 复制 ADB 强制设为桌面命令 (免换按键)",
-            "5. 查看为什么默认应用只有系统桌面"
-        )
-        AlertDialog.Builder(this)
-            .setTitle("解决“默认应用只有系统桌面”问题")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> {
-                        Toast.makeText(this, "正在打开系统桌面详情：请滑到底部点击「清除默认操作」", Toast.LENGTH_LONG).show()
-                        AppManager.openSystemLauncherDetails(this)
-                    }
-                    1 -> {
-                        Toast.makeText(this, "将全面屏手势临时切为经典按键即可在默认桌面菜单中显示 ZenLauncher", Toast.LENGTH_LONG).show()
-                        AppManager.openSystemNavigationSettings(this)
-                    }
-                    2 -> {
-                        AppManager.openDefaultLauncherSettings(this)
-                    }
-                    3 -> {
-                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                        val clip = android.content.ClipData.newPlainText("ZenLauncherAdb", AppManager.getAdbCommand())
-                        clipboard.setPrimaryClip(clip)
-                        Toast.makeText(this, "ADB 命令已复制！可在电脑终端或无线调试中执行", Toast.LENGTH_LONG).show()
-                    }
-                    4 -> showDetailedHyperOsGuideDialog()
-                }
-            }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    private fun showDetailedHyperOsGuideDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("为什么默认应用只显示系统桌面？")
-            .setMessage(
-                "💡 现象解析：\n" +
-                "在小米澎湃OS/MIUI、华为鸿蒙等系统中，只要开启了「全面屏手势」，系统底层就会故意在默认桌面列表中【隐藏所有第三方桌面】（无论 KISS、Nova 还是 ZenLauncher 都不展示），强制只保留「系统桌面」。\n\n" +
-                "【方案 1：清除系统桌面默认操作 (10秒搞定)】\n" +
-                "1. 点击下方按钮，直接跳转进入系统桌面的应用信息页。\n" +
-                "2. 滑动到最下方，点击「清除默认操作」或「默认打开 -> 清除默认值」。\n" +
-                "3. 按底部的 Home 键或上滑回桌面，系统会被迫弹出【选择主屏幕应用】弹窗，勾选 ZenLauncher 并点击【始终】！\n\n" +
-                "【方案 2：临时切换导航方式】\n" +
-                "进入「设置 -> 桌面 -> 系统导航方式」，将手势临时切为「经典按键」，此时再去默认应用设置，ZenLauncher 便会立刻出现在列表中！\n\n" +
-                "【方案 3：ADB 强制指定 (不失手势)】\n" +
-                "运行命令：adb shell cmd package set-home-activity com.zenlauncher.app/.MainActivity"
-            )
-            .setPositiveButton("去清除系统桌面默认值") { _, _ ->
-                AppManager.openSystemLauncherDetails(this)
-            }
-            .setNeutralButton("切换导航键") { _, _ ->
-                AppManager.openSystemNavigationSettings(this)
-            }
-            .setNegativeButton("关闭", null)
-            .show()
-    }
 }

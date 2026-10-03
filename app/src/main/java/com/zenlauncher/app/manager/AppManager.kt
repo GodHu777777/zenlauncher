@@ -1,7 +1,6 @@
 package com.zenlauncher.app.manager
 
 import android.app.Activity
-import android.app.role.RoleManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -12,8 +11,6 @@ import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.net.Uri
 import android.os.Build
-import android.os.Process
-import android.os.UserHandle
 import android.os.UserManager
 import android.provider.Settings
 import com.zenlauncher.app.model.AppInfo
@@ -246,155 +243,18 @@ object AppManager {
     }
 
     fun openDefaultLauncherSettings(activity: Activity) {
-        // 1. Android Q+ RoleManager with startActivityForResult
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            try {
-                val roleManager = activity.getSystemService(Context.ROLE_SERVICE) as? RoleManager
-                if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_HOME)) {
-                    val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_HOME)
-                    activity.startActivityForResult(intent, REQUEST_CODE_ROLE_HOME)
-                    return
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-
-        // 2. MIUI / HyperOS Preferred App Intent
-        try {
-            val miuiIntent = Intent("miui.intent.action.PREFERRED_APP").apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            if (activity.packageManager.resolveActivity(miuiIntent, 0) != null) {
-                activity.startActivity(miuiIntent)
-                return
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        // 3. ACTION_MANAGE_DEFAULT_APPS_SETTINGS
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            try {
-                val intent = Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                activity.startActivity(intent)
-                return
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }
-
-        // 4. ACTION_HOME_SETTINGS
-        try {
-            val intent = Intent(Settings.ACTION_HOME_SETTINGS).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            activity.startActivity(intent)
-            return
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        // 5. Application Details Settings
-        try {
-            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = Uri.parse("package:${activity.packageName}")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            activity.startActivity(intent)
-            return
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-
-        // 6. General Settings fallback
-        try {
-            val intent = Intent(Settings.ACTION_SETTINGS).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            activity.startActivity(intent)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        DefaultLauncherManager.requestDefaultLauncher(activity, REQUEST_CODE_ROLE_HOME)
     }
 
-    fun isDefaultLauncher(context: Context): Boolean {
-        return try {
-            val intent = Intent(Intent.ACTION_MAIN).apply {
-                addCategory(Intent.CATEGORY_HOME)
-            }
-            val resolveInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                context.packageManager.resolveActivity(
-                    intent,
-                    PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
-            }
-            resolveInfo?.activityInfo?.packageName == context.packageName
-        } catch (e: Exception) {
-            false
-        }
-    }
+    fun isDefaultLauncher(context: Context): Boolean =
+        DefaultLauncherManager.getStatus(context).isDefault
 
     fun openSystemLauncherDetails(context: Context) {
-        val launcherPackages = listOf(
-            "com.miui.home",
-            "com.huawei.android.launcher",
-            "com.bbk.launcher2",
-            "com.vivo.upslide",
-            "com.oppo.launcher",
-            "com.sec.android.app.launcher"
-        )
-        for (pkg in launcherPackages) {
-            try {
-                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                    data = Uri.parse("package:$pkg")
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                context.startActivity(intent)
-                return
-            } catch (e: Exception) {
-                // Try next
-            }
-        }
-        try {
-            val intent = Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        DefaultLauncherManager.openSystemLauncherDetails(context)
     }
 
     fun openSystemNavigationSettings(context: Context) {
-        val intents = listOf(
-            Intent().setComponent(ComponentName("com.miui.home", "com.miui.home.settings.NavigationModeSettings")),
-            Intent("miui.intent.action.FULLSCREEN_NAVIGATION"),
-            Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.SubSettings"))
-                .putExtra(":settings:show_fragment", "com.android.settings.gestures.SystemNavigationGestureSettings")
-        )
-        for (intent in intents) {
-            try {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-                return
-            } catch (e: Exception) {
-                // Try next
-            }
-        }
-        try {
-            val intent = Intent(Settings.ACTION_DISPLAY_SETTINGS).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        DefaultLauncherManager.openSystemNavigationSettings(context)
     }
 
     fun getAdbCommand(): String {

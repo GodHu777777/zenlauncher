@@ -1,17 +1,26 @@
-name: Build Native Android APK
+name: Validate and Build Native Android APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: zenlauncher-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
-    name: Build Native Release APK
+    name: Test, Lint and Build Signed APK
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      apk: ${{ steps.version.outputs.apk }}
 
     steps:
       - name: Checkout Repository
@@ -20,53 +29,123 @@ jobs:
       - name: Set up Java JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v3
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Make Gradle Wrapper Executable
-        run: chmod +x ./gradlew
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Read Release Version from Gradle
+        id: version
+        shell: bash
+        run: |
+          chmod +x ./gradlew
+          metadata="$(./gradlew -q :app:printReleaseMetadata)"
+          version="$(printf '%s\n' "$metadata" | sed -n 's/^VERSION_NAME=//p')"
+          code="$(printf '%s\n' "$metadata" | sed -n 's/^VERSION_CODE=//p')"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$code" =~ ^[0-9]+$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "apk=ZenLauncher-v${version}-native.apk" >> "$GITHUB_OUTPUT"
+          echo "Building version $version ($code)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run Navigation Regression Tests and Android Lint
+        run: ./gradlew testDebugUnitTest lintDebug --stacktrace
 
       - name: Build Release APK
         run: ./gradlew assembleRelease --stacktrace
 
-      - name: Copy & Rename APK
+      - name: Verify Signing Certificate and V1/V2 Signatures
+        shell: bash
+        run: |
+          apk=app/build/outputs/apk/release/app-release.apk
+          apksigner="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+          # minSdk 24 would skip the V1 check; explicitly verify both signature schemes.
+          "$apksigner" verify --min-sdk-version 23 --verbose --print-certs "$apk" | tee signing-verification.txt
+          grep -q 'Verified using v1 scheme (JAR signing): true' signing-verification.txt
+          grep -q 'Verified using v2 scheme (APK Signature Scheme v2): true' signing-verification.txt
+          expected="$(keytool -exportcert -keystore app/zenlauncher.jks -alias zenlauncher -storepass zenlauncher123 | sha256sum | cut -d' ' -f1)"
+          actual="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' signing-verification.txt)"
+          test "$expected" = "$actual"
+
+      - name: Copy Versioned APK
+        env:
+          APK_NAME: ${{ steps.version.outputs.apk }}
         run: |
           mkdir -p build_output
-          cp app/build/outputs/apk/release/app-release.apk build_output/ZenLauncher-v2.1.3-native.apk
-          ls -lh build_output/ZenLauncher-v2.1.3-native.apk
+          cp app/build/outputs/apk/release/app-release.apk "build_output/$APK_NAME"
 
-      - name: Upload Artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ZenLauncher-v2.1.3-native-apk
-          path: build_output/ZenLauncher-v2.1.3-native.apk
+          name: ZenLauncher-v${{ steps.version.outputs.version }}-native-apk
+          path: build_output/${{ steps.version.outputs.apk }}
+          if-no-files-found: error
           retention-days: 14
 
+      - name: Upload Verification Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-reports
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/reports/lint-results-debug.*
+            signing-verification.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+  release:
+    name: Publish Validated Version
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Keep Published Versions Immutable
+        id: tag
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        shell: bash
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" > /dev/null; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Version v$VERSION already has a tag. Keeping that release unchanged; this build is available as a workflow artifact." >> "$GITHUB_STEP_SUMMARY"
+          else
+            status=$?
+            if [ "$status" -ne 2 ]; then
+              exit "$status"
+            fi
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download Validated APK
+        if: steps.tag.outputs.publish == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: ZenLauncher-v${{ needs.build.outputs.version }}-native-apk
+          path: build_output
+
       - name: Publish GitHub Release
+        if: steps.tag.outputs.publish == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v2.1.3
-          name: ZenLauncher v2.1.3 (小米澎湃OS/MIUI/鸿蒙默认桌面设置终极解决方案与锁屏修复)
+          tag_name: v${{ needs.build.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: ZenLauncher v${{ needs.build.outputs.version }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
           body: |
-            ## 🚀 ZenLauncher v2.1.3 - 默认桌面全面破局与系统防回跳
+            安装包已通过自动化测试、Android Lint 和统一签名校验（V1 + V2）。
+            更新前可在设置中备份配置；使用与此前官方版本相同的签名覆盖安装。
 
-            ### 💡 针对“默认应用列表只有系统桌面、无第三方桌面”的终极解决方案
-            - **破解小米/鸿蒙等国产 ROM 的全面屏手势限制**：
-              - 国产手机系统在开启「全面屏手势」时，系统会故意在默认应用列表中隐藏所有第三方桌面（包括 KISS Launcher、Nova、ZenLauncher 等）。
-              - 新增多重一键解决通道：
-                1. **一键跳转系统桌面详情页，直接清除默认操作（10秒搞定，推荐度最高，保留全面屏手势）**；
-                2. **一键跳转系统导航方式设置，临时切为经典按键即可瞬间在系统设置中显示 ZenLauncher 并设为默认**；
-                3. **内置 ADB 内核强制设为默认桌面命令一键复制（完美兼顾全面屏手势与第三方桌面）**。
-            
-            ### 🐛 锁屏/返回键行为深度修复
-            - **桌面根视图完全拦截并消费 Back 键与侧滑手势**：彻底杜绝退出到原厂底层桌面。
-            - **AOSP 系统级 Launcher 规范声明**：独立 Task 栈、excludeFromRecents、resumeWhilePausing。
-
-            ### 📥 下载安装
-            直接点击下方 **Assets** 列表里的 `ZenLauncher-v2.1.3-native.apk` 下载安装（签名永久一致，无缝覆盖）。
-          files: build_output/ZenLauncher-v2.1.3-native.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            默认桌面由 Android 系统的 HOME 角色/默认应用设置决定。部分厂商对第三方桌面和全面屏手势另有限制，自动化通过不代表所有设备均已验证。
+            设备回归步骤与覆盖记录见 [兼容性验证说明](https://github.com/${{ github.repository }}/blob/${{ github.sha }}/docs/launcher-compatibility.md)。
+          files: build_output/${{ needs.build.outputs.apk }}

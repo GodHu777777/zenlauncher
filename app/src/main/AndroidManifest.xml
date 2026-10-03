@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Required on Android 11+ (API 30+) to query all installed apps -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <!-- Optional: Used to display upcoming events and agenda on home screen if enabled -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <!-- Required to check for updates and download update APK -->
@@ -10,10 +8,15 @@
     <!-- Required to request system to install downloaded update APK on Android 8.0+ -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- The launcher needs launchable apps and HOME candidates, not every installed package. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
         </intent>
     </queries>
 
@@ -46,8 +49,9 @@
             android:stateNotNeeded="true"
             android:excludeFromRecents="true"
             android:resumeWhilePausing="true"
+            android:enableOnBackInvokedCallback="true"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize|stateAlwaysHidden">
 
             <!-- 1. Pure Home Launcher entry point -->
             <intent-filter>
