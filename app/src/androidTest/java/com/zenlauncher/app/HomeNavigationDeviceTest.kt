@@ -261,7 +261,7 @@ class HomeNavigationDeviceTest {
 }
 
 /** No activity/default/permission state is mutated until both emulator checks pass. */
-class IsolatedEmulatorHomeRule : TestRule {
+class IsolatedEmulatorHomeRule(private val selectZen: Boolean = true) : TestRule {
     val instrumentation: Instrumentation get() = InstrumentationRegistry.getInstrumentation()
     val device: UiDevice get() = UiDevice.getInstance(instrumentation)
     private var userId: Int = -1
@@ -280,9 +280,16 @@ class IsolatedEmulatorHomeRule : TestRule {
                 // Installing this APK can clear the emulator's preferred HOME on Android 7.
                 // Restore the verified pre-install baseline before changing it for the test.
                 setHomeAndVerify(originalHome)
-                setHomeAndVerify(HOME_COMPONENT)
+                if (selectZen) setHomeAndVerify(HOME_COMPONENT)
                 injectNavigationKey(device, KeyEvent.KEYCODE_HOME)
-                assertTrue("ZenLauncher HOME did not appear", device.wait(Until.hasObject(By.res(APP_PACKAGE, "btnSettings")), TIMEOUT_MS))
+                if (selectZen) {
+                    assertTrue("ZenLauncher HOME did not appear", device.wait(Until.hasObject(By.res(APP_PACKAGE, "btnSettings")), TIMEOUT_MS))
+                } else {
+                    assertTrue("Stock HOME did not appear before selection testing", device.wait(
+                        Until.hasObject(By.pkg(originalHome.packageName).depth(0)), TIMEOUT_MS
+                    ))
+                    assertEquals(originalHome.packageName, device.currentPackageName)
+                }
                 base.evaluate()
             } catch (failure: Throwable) {
                 testFailure = failure
@@ -413,7 +420,7 @@ private const val TAG = "ZenHomeNavigationTest"
 private val HOME_COMPONENT = ComponentName(APP_PACKAGE, "$APP_PACKAGE.MainActivity")
 private val COMPONENT_PATTERN = Regex("[A-Za-z0-9_.$]+/[A-Za-z0-9_.$]+")
 
-private fun injectNavigationKey(device: UiDevice, keyCode: Int) {
+internal fun injectNavigationKey(device: UiDevice, keyCode: Int) {
     device.waitForIdle(TIMEOUT_MS)
     // In UiAutomator 2.3 pressHome()/pressBack() return whether TYPE_WINDOW_CONTENT_CHANGED was
     // observed, which can be false when root Back is correctly consumed. pressKeyCode() instead
@@ -422,7 +429,7 @@ private fun injectNavigationKey(device: UiDevice, keyCode: Int) {
 }
 
 /** Poll real lifecycle/resolver state with a deadline; UI state uses UiDevice.wait(Until...). */
-private fun awaitCondition(condition: () -> Boolean): Boolean {
+internal fun awaitCondition(condition: () -> Boolean): Boolean {
     val deadline = SystemClock.uptimeMillis() + TIMEOUT_MS
     while (true) {
         if (condition()) return true

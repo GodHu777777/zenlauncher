@@ -16,13 +16,17 @@ v2.1.4 的修复目标是：默认桌面请求能正确反映系统结果；返�
 | 远程构建机 | JDK 17、SDK 34、Build Tools 34.0.0 | v2.1.4 构建成功；58 项测试通过；Lint 0 错误、105 警告；原证书 V1/V2 验证通过 |
 | Robolectric API 24/28/29/34 | Activity、对话框、HOME/角色判断及设置回调 | Main 27、Manager 25、Settings 6，全部通过，无跳过 |
 | 远程 Android 设备 | 实际 Home/Back、SystemUI、锁屏 | 无真机连接；API 34 AOSP 软件模拟器中旧 APK 安装成功，但系统服务频繁 ANR/崩溃，已停止本次尝试并保留 AVD |
-| AOSP / Pixel 真机或模拟器 | Android 标准导航路径 | 升级、HOME、Back 及应用抽屉实测未执行，仍待稳定设备验证 |
+| GitHub KVM / Android 7.0（API 24） | Android 标准导航、抽屉、Activity 销毁及进程终止后的 HOME 恢复 | `89561a4` 的 9 项设备测试全部通过、无跳过，进程恢复 3 项检查通过；实际授权 UI、升级及重启尚未验证 |
+| GitHub KVM / Android 14（API 34） | 相同导航测试 | 最近运行在 KVM 初始化失败，尚待完整通过；不计为应用失败或通过 |
+| AOSP / Pixel 真机 | 实际手势、锁屏及升级 | 待实测 |
 | 小米 / HyperOS / MIUI | 按键、全面屏手势、默认桌面入口 | 待实测，尤其关注厂商手势限制 |
 | 华为 / EMUI（支持 APK） | 默认桌面与系统导航 | 待实测 |
 | OPPO / ColorOS、vivo / OriginOS | 默认桌面与系统导航 | 待实测 |
 | 三星 / One UI | 默认桌面与系统导航 | 待实测 |
 
 测试报告与签名验证结果由 GitHub Actions 的 `verification-reports` artifact 保存。构建通过不能标记上表的真机项目为通过。
+
+API 24 的通过证据来自 [CI 37116355598](https://github.com/GodHu777777/zenlauncher/actions/runs/37116355598)。该次构建检查通过，但 API 34 的 KVM 初始化失败，因此整次工作流未通过且发布步骤跳过。后续提交新增了授权/取消测试，须再次运行，不能直接沿用这 9 例的通过结果。
 
 用户所报告的回到原厂桌面问题，仍需具体机型、ROM 版本、触发方式及新版诊断来完成闭环。原 v2.1.3 与 v2.1.4 安装包的签名证书 SHA-256 均为 `337b92f7bda67e7c2ea553ba969e707257c3d438c3a9320c94f58b3414e7820c`。
 
@@ -50,6 +54,8 @@ v2.1.4 的修复目标是：默认桌面请求能正确反映系统结果；返�
 ### Android 系统导航自动化
 
 CI 新增 API 24 和 API 34 的独立 KVM 模拟器任务。先在系统内实际执行 `HomeNavigationDeviceTest`，检查 Home/Back、内部与系统设置页、搜索与抽屉退出、已安装应用的可见性和启动，以及 Activity 销毁后的恢复。随后从应用进程外执行 `scripts/verify-home-recovery.py`：在系统设置前台终止 ZenLauncher，验证旧进程已退出，再发送系统 Home 键并检查新进程、实际前台页面和返回行为。
+
+`DefaultHomeSelectionDeviceTest` 另有授权与取消两例：以原桌面为起点，从普通应用入口打开 ZenLauncher，点击应用内的设置按钮，在 Android 7 的默认桌面设置或 Android 14 的 HOME 角色弹窗完成真实选择。此过程中不会用 shell 将 ZenLauncher 设为默认；完成后核验角色、HOME 解析、设置提示和实际按键去向，取消时检查仍保留原桌面。新增两例的通过情况以 CI 实际结果为准。
 
 本机手动执行时也必须使用可重置的模拟器。先记录尚未安装 ZenLauncher 时的原桌面组件，并将其传入测试；Android 7 安装第二个 HOME 应用后可能重新显示选择器，不能依赖安装前的选择仍然有效：
 
@@ -107,6 +113,8 @@ adb logcat -d -s AndroidRuntime ActivityTaskManager
 如果解析到 `com.zenlauncher.app/.MainActivity` 但 Home 仍进入其他桌面，记录导航模式、前台 Activity 和系统日志，继续定位 SystemUI/OEM 路由或崩溃。如果解析到原厂桌面，应优先检查默认角色是否真的授予或被系统更改。
 
 ADB 设置默认 HOME 是显式调试操作，需要用户已授权调试，并且仍可能受 ROM 策略限制。不要禁用或卸载系统桌面来“修复”导航；部分系统的最近任务与手势依赖该组件。
+
+v2.1.5 的高级帮助命令在 Android 设备 shell 内执行 `am get-current-user`，再以返回的数字指定 `set-home-activity --user`。省略 `--user` 会默认操作主用户 0；Android 7/9 的该命令也不能直接使用 `--user current`，因其未将 `current` 转换为实际编号。此修复针对命令的用户范围，不能据此认定厂商第二空间或分身功能已经实测通过。
 
 ## 远程构建约束
 

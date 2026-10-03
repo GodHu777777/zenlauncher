@@ -112,7 +112,11 @@ class DefaultLauncherSetup(
         val command = AppManager.getAdbCommand()
         show(AlertDialog.Builder(activity)
             .setTitle("ADB 设置默认桌面")
-            .setMessage("需要已授权的 ADB 连接。命令可能被系统策略拒绝，也不能保证厂商手势支持。执行后请返回应用核验状态，并实际按 Home 测试。\n\n$command")
+            .setMessage(
+                "适用于 macOS / Linux 终端或 Windows PowerShell，需要已授权的 ADB 连接。\n\n" +
+                    "请先在手机上切换到要设置桌面的用户或空间；命令作用于手机当前前台用户。\n\n" +
+                    "命令可能被系统策略拒绝，也不能保证厂商手势支持。执行后请返回应用核验状态，并实际按 Home 测试。\n\n$command"
+            )
             .setPositiveButton("复制命令") { _, _ -> copy("ZenLauncher ADB", command) }
             .setNegativeButton("关闭", null)
             .create())

@@ -258,6 +258,8 @@ object AppManager {
     }
 
     fun getAdbCommand(): String {
-        return "adb shell cmd package set-home-activity com.zenlauncher.app/.MainActivity"
+        // Resolve the numeric foreground user inside Android's shell. Older Android
+        // versions accept --user but do not translate the special value "current".
+        return "adb shell 'cmd package set-home-activity --user \"\$(am get-current-user)\" com.zenlauncher.app/.MainActivity'"
     }
 }

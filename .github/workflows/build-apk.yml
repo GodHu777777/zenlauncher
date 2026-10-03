@@ -121,10 +121,33 @@ jobs:
       - name: Enable and Require KVM
         shell: bash
         run: |
+          report_kvm_failure() {
+            if [[ -e /dev/kvm ]]; then
+              echo "::error title=KVM initialization failed::/dev/kvm is present but KVM setup did not complete. $(ls -l /dev/kvm); $(id)"
+            else
+              echo "::error title=KVM initialization failed::/dev/kvm does not exist on this runner. $(id)"
+            fi
+            ls -l /dev/kvm || true
+            id
+          }
+          trap report_kvm_failure ERR
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-          test -r /dev/kvm && test -w /dev/kvm
+          sudo udevadm settle --timeout=10
+          # Give asynchronous udev permission changes a bounded chance to finish.
+          for attempt in {1..10}; do
+            if [[ -r /dev/kvm && -w /dev/kvm ]]; then
+              exit 0
+            fi
+            sleep 1
+          done
+          if [[ -r /dev/kvm && -w /dev/kvm ]]; then
+            exit 0
+          fi
+          echo '::error::KVM is still not readable and writable after the 10-second permission wait; hardware acceleration is required.'
+          report_kvm_failure
+          exit 1
 
       - name: Compile Device Tests
         run: |

@@ -20,6 +20,8 @@ Android 10 及以上优先通过系统 HOME 角色请求；旧系统与不支持
 
 v2.1.4 重点修复桌面导航：统一设置入口与授权返回后的状态核验，处理授权取消及设置回退，并通过 AndroidX 处理返回键与预测返回手势。桌面根页面的返回操作应留在 ZenLauncher；Home 操作的目标仍由系统选定的默认桌面决定。
 
+v2.1.5 修正高级 ADB 帮助中的用户范围：命令先在手机上读取当前前台用户编号，再为该用户设置桌面，避免在副用户/第二空间操作时误设主用户。复制的命令适用于 Mac、Linux 或 Windows PowerShell；执行前应先在手机上进入需要设置的用户空间。
+
 小米/HyperOS、华为/EMUI、OPPO/ColorOS、vivo/OriginOS、三星/One UI 等系统可能对第三方桌面、全面屏手势、多用户或设备管理另有限制。系统设置入口是否可用、是否允许保留第三方桌面，由具体 ROM 和版本决定。应用内的设置引导及 ADB 辅助命令不能保证绕过厂商限制。这里的华为兼容范围仅指支持 Android APK 的系统，不包含 HarmonyOS NEXT 原生应用平台。
 
 当前没有覆盖所有厂商真机的验证结果。复现记录、设备覆盖和回归步骤见 [桌面兼容性验证说明](docs/launcher-compatibility.md)。自动化测试只能证明其覆盖的应用行为，不能代替系统导航和厂商 ROM 实测。
@@ -43,7 +45,7 @@ v2.1.4 重点修复桌面导航：统一设置入口与授权返回后的状态�
 
 版本唯一来源是 `app/build.gradle` 中的 `versionCode` 和 `versionName`。每次发布同时递增两者，无需修改 workflow 标签。签名必须保持现有 keystore、alias 和密码，不要生成新的签名替代它。
 
-推送 `main` 或手动运行 workflow 时，CI 先执行单元回归、Android Lint、Release 构建及证书/V1/V2 签名检查。通过后保留构建产物，并为尚无版本标签的新版本创建 GitHub Release。已存在的版本标签保持不变；相同版本的新提交只提供 workflow artifact，应递增版本号后再正式发布。Pull Request 执行验证及构建，不创建 Release。
+推送 `main` 或手动运行 workflow 时，CI 执行单元回归、Android Lint、Release 构建及证书/V1/V2 签名检查，同时在 API 24/34 的独立 KVM 模拟器验证系统默认桌面选择、导航和进程恢复。全部通过后保留构建产物，并为尚无版本标签的新版本创建 GitHub Release。已存在的版本标签保持不变；相同版本的新提交只提供 workflow artifact，应递增版本号后再正式发布。Pull Request 执行验证及构建，不创建 Release。
 
 单元测试使用 Robolectric 模拟部分 Android 行为；它不运行厂商桌面、SystemUI 或真实键盘。实机验证按 [回归说明](docs/launcher-compatibility.md) 执行。
 
