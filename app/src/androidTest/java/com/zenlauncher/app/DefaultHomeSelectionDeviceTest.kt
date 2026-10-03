@@ -6,6 +6,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
+import android.util.Xml
 import android.view.KeyEvent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
@@ -22,13 +23,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.xmlpull.v1.XmlPullParser
+import java.io.ByteArrayOutputStream
+import java.io.StringReader
 
 /**
  * Exercises the user-facing default HOME request rather than provisioning Zen with a shell command.
  * The fixture uses shell commands only to establish/restore the pre-install stock HOME. Assignment
  * to Zen must happen through the app button and Android's Settings/PermissionController UI.
- * Selectors follow AOSP Android 7 HomeSettings/preference_home_app and Android 14
- * PermissionController RequestRoleFragment/request_role_item. Missing UI is a failure, not a skip.
+ * The candidate must have one exact installed-app label in the expected system package and one
+ * radio control in its nearest containing row. Internal Settings/PermissionController layout IDs
+ * may differ between system images. Missing or ambiguous UI is a failure, never a skip.
  */
 @RunWith(AndroidJUnit4::class)
 class DefaultHomeSelectionDeviceTest {
@@ -45,21 +50,12 @@ class DefaultHomeSelectionDeviceTest {
         openFromLauncherEntry()
         val systemUi = requestDefaultThroughApp()
 
+        candidateRadio(systemUi).click()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // The custom title and app rows both use id/title, so constrain to the choices list.
-            waitFor(By.res(systemUi, "title").text(ownCandidateLabel())
-                .hasAncestor(By.res(systemUi, "list"))).click()
             waitFor(By.res("android", "button1").pkg(systemUi).enabled(true)).click()
         } else {
-            // Android 7's title container consumes clicks. The radio itself is non-clickable,
-            // so clicking it dispatches to home_app_pref's actual HomeSettings listener.
-            val candidate = legacyHomeCandidate()
-            val radio = requireNotNull(candidate.findObject(By.res(SYSTEM_SETTINGS_PACKAGE, "home_radio"))) {
-                "Stock HOME settings candidate has no selection control"
-            }
-            radio.click()
-            waitFor(By.res(SYSTEM_SETTINGS_PACKAGE, "home_radio").checked(true)
-                .hasAncestor(legacyHomeCandidateSelector()))
+            // Older Settings applies the choice immediately rather than showing confirmation.
+            assertDefault(ZEN_HOME_COMPONENT, expectedRoleHeld = true)
             injectNavigationKey(device, KeyEvent.KEYCODE_BACK)
         }
 
@@ -91,13 +87,16 @@ class DefaultHomeSelectionDeviceTest {
             // Cancel explicitly; never select the "Don't ask again" option.
             waitFor(By.res("android", "button2").pkg(systemUi)).click()
         } else {
-            legacyHomeCandidate() // Prove that a real selection screen opened before canceling.
+            candidateRadio(systemUi) // Prove a real choice exists before canceling.
             injectNavigationKey(device, KeyEvent.KEYCODE_BACK)
         }
 
         waitFor(By.pkg(ZEN_PACKAGE).depth(0))
-        // Role rejection returns to the app's compatibility-help dialog. Back dismisses it;
-        // on old Android this same key is consumed by the already-visible desktop root.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Returning to the app can precede the ActivityResult callback. Wait for its actual
+            // help dialog before Back, otherwise root may consume Back just before it is shown.
+            waitFor(By.pkg(ZEN_PACKAGE).text("默认桌面与返回问题"))
+        }
         injectNavigationKey(device, KeyEvent.KEYCODE_BACK)
         assertZenRoot(expectDefault = false)
         assertDefault(stockHome, expectedRoleHeld = false)
@@ -132,19 +131,31 @@ class DefaultHomeSelectionDeviceTest {
         waitFor(res("btnSetDefaultQuick")).click()
         waitFor(By.pkg(expectedSystemPackage).depth(0))
         assertEquals("The app must open the expected system default-HOME selection UI", expectedSystemPackage, device.currentPackageName)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            waitFor(By.res(expectedSystemPackage, "title").text(ownCandidateLabel())
-                .hasAncestor(By.res(expectedSystemPackage, "list")))
-        } else {
-            legacyHomeCandidate()
-        }
+        candidateRadio(expectedSystemPackage)
         return expectedSystemPackage
     }
 
-    private fun legacyHomeCandidateSelector(): BySelector = By.res(SYSTEM_SETTINGS_PACKAGE, "home_app_pref")
-        .hasDescendant(By.res("android", "title").text(ownCandidateLabel()))
-
-    private fun legacyHomeCandidate(): UiObject2 = waitFor(legacyHomeCandidateSelector())
+    private fun candidateRadio(systemPackage: String): UiObject2 {
+        val label = ownCandidateLabel()
+        val selector = By.pkg(systemPackage).text(label)
+        waitFor(selector)
+        val labels = device.findObjects(selector).filter { !it.visibleBounds.isEmpty }
+        if (labels.size != 1) {
+            failWithUi("Expected exactly one visible '$label' candidate in $systemPackage; found ${labels.size}")
+        }
+        if (labels.single().className == "android.widget.RadioButton") return labels.single()
+        var ancestor = labels.single().parent
+        while (ancestor != null) {
+            val radios = ancestor.findObjects(By.pkg(systemPackage).clazz("android.widget.RadioButton"))
+                .filter { !it.visibleBounds.isEmpty }
+            if (radios.size == 1) return radios.single()
+            if (radios.size > 1) {
+                failWithUi("The nearest radio-containing ancestor of '$label' contains ${radios.size} radios; refusing an ambiguous selection")
+            }
+            ancestor = ancestor.parent
+        }
+        failWithUi("No radio control belongs to the unique '$label' candidate in $systemPackage")
+    }
 
     @Suppress("DEPRECATION")
     private fun ownCandidateLabel(): String {
@@ -200,8 +211,36 @@ class DefaultHomeSelectionDeviceTest {
     }
 
     private fun waitFor(selector: BySelector): UiObject2 = requireNotNull(device.wait(Until.findObject(selector), SELECTION_TIMEOUT_MS)) {
-        "Missing required system/application UI: $selector; foreground=${device.currentPackageName}"
+        "Missing required system/application UI: $selector; foreground=${device.currentPackageName}; ${compactUiDiagnostic()}"
     }
+
+    private fun failWithUi(message: String): Nothing = throw AssertionError(
+        "$message; foreground=${device.currentPackageName}; ${compactUiDiagnostic()}"
+    )
+
+    /** Keep useful failure evidence in the public test annotation if artifact downloads fail. */
+    private fun compactUiDiagnostic(): String = runCatching {
+        val output = ByteArrayOutputStream()
+        device.dumpWindowHierarchy(output)
+        val parser = Xml.newPullParser().apply { setInput(StringReader(output.toString("UTF-8"))) }
+        val nodes = mutableListOf<String>()
+        while (parser.eventType != XmlPullParser.END_DOCUMENT && nodes.size < 20) {
+            if (parser.eventType == XmlPullParser.START_TAG && parser.name == "node") {
+                fun attribute(name: String) = parser.getAttributeValue(null, name).orEmpty()
+                val text = attribute("text").replace(Regex("\\s+"), " ")
+                val id = attribute("resource-id")
+                val bounds = attribute("bounds")
+                val checkable = attribute("checkable") == "true"
+                val visible = attribute("visible-to-user") != "false" && bounds != "[0,0][0,0]"
+                if (visible && (text.isNotEmpty() || id.isNotEmpty() || checkable)) {
+                    nodes += "t='${text.take(60)}' id='${id.take(85)}' c=${attribute("class").substringAfterLast('.')} " +
+                        "checked=${attribute("checked")} clickable=${attribute("clickable")} b=$bounds"
+                }
+            }
+            parser.next()
+        }
+        "ui=[${nodes.joinToString("; ")}]".take(2200)
+    }.getOrElse { "UI dump failed: ${it.javaClass.simpleName}: ${it.message}".take(2200) }
 
     private fun res(id: String) = By.res(ZEN_PACKAGE, id)
 }
