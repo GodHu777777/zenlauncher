@@ -99,7 +99,7 @@ jobs:
   emulator:
     name: Device Navigation (API ${{ matrix.api-level }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -170,6 +170,10 @@ jobs:
             # Capture while the device is still running; the action stops it on return.
             timeout 15s adb shell dumpsys activity activities > "$evidence/activity.txt" 2>&1
             timeout 15s adb shell dumpsys window windows > "$evidence/window.txt" 2>&1
+            timeout 15s adb shell dumpsys window displays > "$evidence/displays.txt" 2>&1
+            # Reboot disconnects the original streaming logcat process. Capture
+            # the new boot's buffer as well, before the emulator action stops it.
+            timeout 15s adb logcat -d -v threadtime > "$evidence/logcat-after-recovery.txt" 2>&1
             timeout 15s adb shell dumpsys package com.zenlauncher.app > "$evidence/package.txt" 2>&1
             timeout 15s adb exec-out screencap -p > "$evidence/final-screen.png" 2> "$evidence/screencap.log"
             timeout 15s adb pull /sdcard/Android/data/com.zenlauncher.app/files/screenshots "$evidence/screenshots" > "$evidence/screenshot-pull.log" 2>&1
@@ -201,28 +205,41 @@ jobs:
             exit 1
           fi
           test_status=0
+          sdk="$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
+          if [[ "$sdk" == 34 ]]; then
+            gesture_args=(-Pandroid.testInstrumentationRunnerArguments.gestures=true)
+          elif [[ "$sdk" == 24 ]]; then
+            # Android 7 has no platform gestural navigation. Exclude the API 34
+            # suite explicitly so every reported test must still execute.
+            gesture_args=(-Pandroid.testInstrumentationRunnerArguments.notClass=com.zenlauncher.app.GestureNavigationDeviceTest)
+          else
+            echo "::error::No navigation test selection is defined for API $sdk."
+            exit 1
+          fi
           # Installing a new HOME candidate can reset API 24's preferred activity.
           # Pass the verified pre-install choice so the fixture can restore it after install.
           # Keep external-files failure screenshots available for the evidence trap.
           ./gradlew connectedDebugAndroidTest \
             -Pandroid.testInstrumentationRunnerArguments.emulator=true \
             "-Pandroid.testInstrumentationRunnerArguments.originalHome=$original_home" \
+            "${gesture_args[@]}" \
             -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true \
             --stacktrace 2>&1 | tee "$evidence/gradle.txt" || test_status=$?
           report_status=0
-          python3 build/check-device-results.py "$test_status" || report_status=$?
+          python3 build/check-device-results.py "$test_status" "$sdk" || report_status=$?
           if [[ "$test_status" -ne 0 ]]; then
             exit "$test_status"
           fi
           if [[ "$report_status" -ne 0 ]]; then
             exit "$report_status"
           fi
-          python3 scripts/verify-home-recovery.py --apk app/build/outputs/apk/debug/app-debug.apk --output build/device-verification/process-recovery.json
+          python3 scripts/verify-home-recovery.py --apk app/build/outputs/apk/debug/app-debug.apk --output build/device-verification/home-recovery.json
           BASH
           cat > build/check-device-results.py <<'PY'
           import pathlib
           import sys
           import xml.etree.ElementTree as ET
+          from collections import Counter
 
           def error(message):
               escaped = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
@@ -249,6 +266,15 @@ jobs:
           print(f'Device navigation: {len(cases)} cases, {failures} failures/errors, {skipped} skipped.')
           if not cases:
               error('No connected instrumentation test cases were reported; this is not a passing validation.')
+          counts = Counter(case.get('classname', '') for case in cases)
+          required = {'HomeNavigationDeviceTest': 9, 'DefaultHomeSelectionDeviceTest': 2}
+          if sys.argv[2] == '34':
+              required['GestureNavigationDeviceTest'] = 3
+          for name, minimum in required.items():
+              actual = counts[f'com.zenlauncher.app.{name}']
+              if actual < minimum:
+                  invalid_reports = True
+                  error(f'API {sys.argv[2]} requires at least {minimum} cases from {name}; only {actual} ran.')
           if int(sys.argv[1]) != 0:
               log = pathlib.Path('build/emulator-evidence/gradle.txt')
               tail = log.read_text(errors='replace')[-3000:] if log.exists() else 'Gradle log unavailable.'
