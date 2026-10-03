@@ -18,6 +18,7 @@ jobs:
   build:
     name: Test, Lint and Build Signed APK
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       version: ${{ steps.version.outputs.version }}
       apk: ${{ steps.version.outputs.apk }}
@@ -95,9 +96,170 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  emulator:
+    name: Device Navigation (API ${{ matrix.api-level }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [24, 34]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Enable and Require KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -r /dev/kvm && test -w /dev/kvm
+
+      - name: Compile Device Tests
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug assembleDebugAndroidTest --stacktrace
+
+      - name: Prepare Device Test Runner and Evidence Capture
+        shell: bash
+        run: |
+          mkdir -p build/emulator-evidence
+          cat > build/run-emulator-tests.sh <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          evidence=build/emulator-evidence
+          logcat_pid=
+          collect_evidence() {
+            local status=$?
+            trap - EXIT
+            set +e
+            # Capture while the device is still running; the action stops it on return.
+            timeout 15s adb shell dumpsys activity activities > "$evidence/activity.txt" 2>&1
+            timeout 15s adb shell dumpsys window windows > "$evidence/window.txt" 2>&1
+            timeout 15s adb shell dumpsys package com.zenlauncher.app > "$evidence/package.txt" 2>&1
+            timeout 15s adb exec-out screencap -p > "$evidence/final-screen.png" 2> "$evidence/screencap.log"
+            timeout 15s adb pull /sdcard/Android/data/com.zenlauncher.app/files/screenshots "$evidence/screenshots" > "$evidence/screenshot-pull.log" 2>&1
+            if [[ -n "$logcat_pid" ]]; then
+              kill "$logcat_pid" 2>/dev/null
+              wait "$logcat_pid" 2>/dev/null
+            fi
+            exit "$status"
+          }
+          trap collect_evidence EXIT
+          trap 'exit 143' TERM
+          trap 'exit 130' INT
+          adb logcat -c
+          adb logcat -v threadtime > "$evidence/logcat.txt" 2>&1 &
+          logcat_pid=$!
+          adb shell getprop > "$evidence/device-properties.txt"
+          # Set an explicit stock HOME before Gradle installs a second HOME candidate.
+          # The instrumentation fixture can then restore a known choice after each test.
+          original_home="$(adb shell cmd package resolve-activity --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.HOME | tr -d '\r' | tail -n 1)"
+          printf '%s\n' "$original_home" > "$evidence/initial-home.txt"
+          if [[ ! "$original_home" =~ ^[a-zA-Z0-9_.]+/[a-zA-Z0-9_.$]+$ || "$original_home" == android/* || "$original_home" == com.zenlauncher.app/* ]]; then
+            echo '::error::The fresh emulator has no unambiguous stock HOME to restore.'
+            exit 1
+          fi
+          adb shell cmd package set-home-activity --user 0 "$original_home" | tee "$evidence/set-initial-home.txt"
+          restored_home="$(adb shell cmd package resolve-activity --brief --user 0 -a android.intent.action.MAIN -c android.intent.category.HOME | tr -d '\r' | tail -n 1)"
+          if [[ "$restored_home" != "$original_home" ]]; then
+            echo '::error::The emulator did not retain its explicit stock HOME choice.'
+            exit 1
+          fi
+          test_status=0
+          # Keep external-files failure screenshots available for the evidence trap.
+          ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.emulator=true -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true --stacktrace 2>&1 | tee "$evidence/gradle.txt" || test_status=$?
+          report_status=0
+          python3 build/check-device-results.py "$test_status" || report_status=$?
+          if [[ "$test_status" -ne 0 ]]; then
+            exit "$test_status"
+          fi
+          if [[ "$report_status" -ne 0 ]]; then
+            exit "$report_status"
+          fi
+          python3 scripts/verify-home-recovery.py --apk app/build/outputs/apk/debug/app-debug.apk --output build/device-verification/process-recovery.json
+          BASH
+          cat > build/check-device-results.py <<'PY'
+          import pathlib
+          import sys
+          import xml.etree.ElementTree as ET
+
+          def error(message):
+              escaped = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print(f'::error title=Device navigation verification::{escaped}')
+
+          cases = []
+          invalid_reports = False
+          for report in pathlib.Path('app/build/outputs/androidTest-results/connected').rglob('*.xml'):
+              try:
+                  cases.extend(ET.parse(report).getroot().iter('testcase'))
+              except ET.ParseError as exc:
+                  error(f'Invalid connected test report {report}: {exc}')
+                  invalid_reports = True
+          failures = 0
+          skipped = 0
+          for case in cases:
+              label = f"{case.get('classname', '?')}.{case.get('name', '?')}"
+              for failure in list(case.findall('failure')) + list(case.findall('error')):
+                  failures += 1
+                  error(f"{label}: {failure.get('message', '')}\n{failure.text or ''}"[:3000])
+              if case.find('skipped') is not None:
+                  skipped += 1
+                  error(f'{label} was skipped; emulator navigation coverage must execute.')
+          print(f'Device navigation: {len(cases)} cases, {failures} failures/errors, {skipped} skipped.')
+          if not cases:
+              error('No connected instrumentation test cases were reported; this is not a passing validation.')
+          if int(sys.argv[1]) != 0:
+              log = pathlib.Path('build/emulator-evidence/gradle.txt')
+              tail = log.read_text(errors='replace')[-3000:] if log.exists() else 'Gradle log unavailable.'
+              error(f'connectedDebugAndroidTest exited with status {sys.argv[1]}.\n{tail}')
+          if cases and not (invalid_reports or failures or skipped) and int(sys.argv[1]) == 0:
+              print(f'::notice title=Device navigation coverage::{len(cases)} instrumentation cases executed, 0 failures/errors, 0 skipped.')
+          sys.exit(1 if invalid_reports or not cases or failures or skipped else 0)
+          PY
+
+      - name: Run Navigation Tests on a KVM Emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api-level }}
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          ram-size: 2048M
+          emulator-boot-timeout: 300
+          disable-linux-hw-accel: false
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -camera-front none -accel on
+          script: bash build/run-emulator-tests.sh
+
+      - name: Upload Device Test Reports and Failure Evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: navigation-api-${{ matrix.api-level }}-evidence
+          path: |
+            app/build/reports/androidTests/connected/
+            app/build/outputs/androidTest-results/connected/
+            build/emulator-evidence/
+            build/device-verification/
+          if-no-files-found: warn
+          retention-days: 14
+
   release:
     name: Publish Validated Version
-    needs: build
+    needs: [build, emulator]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -140,7 +302,7 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           body: |
-            安装包已通过自动化测试、Android Lint 和统一签名校验（V1 + V2）。
+            安装包已通过单元测试、Android 7.0 / 14 模拟器导航测试、Android Lint 和统一签名校验（V1 + V2）。
             更新前可在设置中备份配置；使用与此前官方版本相同的签名覆盖安装。
 
             默认桌面由 Android 系统的 HOME 角色/默认应用设置决定。部分厂商对第三方桌面和全面屏手势另有限制，自动化通过不代表所有设备均已验证。

@@ -47,6 +47,21 @@ v2.1.4 的修复目标是：默认桌面请求能正确反映系统结果；返�
 
 不通过降低 Lint 严重性、忽略测试失败或替换签名来让发布通过。
 
+### Android 系统导航自动化
+
+CI 新增 API 24 和 API 34 的独立 KVM 模拟器任务。先在系统内实际执行 `HomeNavigationDeviceTest`，检查 Home/Back、内部与系统设置页、搜索与抽屉退出、已安装应用的可见性和启动，以及 Activity 销毁后的恢复。随后从应用进程外执行 `scripts/verify-home-recovery.py`：在系统设置前台终止 ZenLauncher，验证旧进程已退出，再发送系统 Home 键并检查新进程、实际前台页面和返回行为。
+
+本机手动执行时也必须使用可重置的模拟器，并在安装测试应用之前明确选定模拟器原桌面：
+
+```bash
+./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.emulator=true -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true
+python3 scripts/verify-home-recovery.py --apk app/build/outputs/apk/debug/app-debug.apk --output build/device-verification/process-recovery.json
+```
+
+测试改变默认桌面前会检查模拟器特征，每例结束后恢复并核验原 HOME；不满足环境条件、无实际测试结果、失败或跳过都会使 CI 失败。报告、日志、截图和进程恢复结果保存为 `navigation-api-24-evidence` / `navigation-api-34-evidence`。后续版本的发布还需通过这两项检查。
+
+这些测试运行普通 Android 系统的 Debug 包，不代表厂商 ROM、实际侧滑/预测返回手势、锁屏、重启、配置保留或 Release 覆盖升级已经验证。新增任务的运行结果需以对应 GitHub 提交的检查记录为准，不能仅凭工作流或测试文件存在填为通过。
+
 ## 真机回归清单
 
 先记下品牌/型号、Android 版本、完整 ROM 版本、导航方式、用户/工作资料模式、APK 版本，以及测试前系统选定的默认桌面。优先覆盖 Android 7–9、10–12、13–14 和更新系统，按键导航与手势导航分别测试。
