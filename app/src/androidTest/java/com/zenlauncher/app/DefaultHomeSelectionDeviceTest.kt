@@ -31,9 +31,9 @@ import java.io.StringReader
  * Exercises the user-facing default HOME request rather than provisioning Zen with a shell command.
  * The fixture uses shell commands only to establish/restore the pre-install stock HOME. Assignment
  * to Zen must happen through the app button and Android's Settings/PermissionController UI.
- * The candidate must have one exact installed-app label in the expected system package and one
- * radio control in its nearest containing row. Internal Settings/PermissionController layout IDs
- * may differ between system images. Missing or ambiguous UI is a failure, never a skip.
+ * The candidate must have one exact installed-app label in the expected system package. Nougat
+ * opens Configure apps, then a Home app list dialog; modern role requests use a radio choice and
+ * confirmation. Missing or ambiguous UI is a failure, never a skip.
  */
 @RunWith(AndroidJUnit4::class)
 class DefaultHomeSelectionDeviceTest {
@@ -50,11 +50,15 @@ class DefaultHomeSelectionDeviceTest {
         openFromLauncherEntry()
         val systemUi = requestDefaultThroughApp()
 
-        candidateRadio(systemUi).click()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            candidateRadio(systemUi).click()
             waitFor(By.res("android", "button1").pkg(systemUi).enabled(true)).click()
         } else {
-            // Older Settings applies the choice immediately rather than showing confirmation.
+            legacyHomeCandidate().click()
+            // Nougat's AppListPreference saves and closes the list immediately. Its parent
+            // preference summary now also contains Zen's label, so label disappearance is not
+            // evidence that the dialog closed; check the real AlertDialog title instead.
+            waitForLegacyDialogClosed()
             assertDefault(ZEN_HOME_COMPONENT, expectedRoleHeld = true)
             injectNavigationKey(device, KeyEvent.KEYCODE_BACK)
         }
@@ -87,7 +91,11 @@ class DefaultHomeSelectionDeviceTest {
             // Cancel explicitly; never select the "Don't ask again" option.
             waitFor(By.res("android", "button2").pkg(systemUi)).click()
         } else {
-            candidateRadio(systemUi) // Prove a real choice exists before canceling.
+            legacyHomeCandidate() // Prove the Home app list opened before canceling.
+            injectNavigationKey(device, KeyEvent.KEYCODE_BACK) // Dismiss the list dialog.
+            waitForLegacyDialogClosed()
+            assertDefault(stockHome, expectedRoleHeld = false)
+            // ACTION_HOME_SETTINGS opened Configure apps, which is still underneath the dialog.
             injectNavigationKey(device, KeyEvent.KEYCODE_BACK)
         }
 
@@ -96,8 +104,8 @@ class DefaultHomeSelectionDeviceTest {
             // Returning to the app can precede the ActivityResult callback. Wait for its actual
             // help dialog before Back, otherwise root may consume Back just before it is shown.
             waitFor(By.pkg(ZEN_PACKAGE).text("默认桌面与返回问题"))
+            injectNavigationKey(device, KeyEvent.KEYCODE_BACK)
         }
-        injectNavigationKey(device, KeyEvent.KEYCODE_BACK)
         assertZenRoot(expectDefault = false)
         assertDefault(stockHome, expectedRoleHeld = false)
         injectNavigationKey(device, KeyEvent.KEYCODE_HOME)
@@ -131,8 +139,44 @@ class DefaultHomeSelectionDeviceTest {
         waitFor(res("btnSetDefaultQuick")).click()
         waitFor(By.pkg(expectedSystemPackage).depth(0))
         assertEquals("The app must open the expected system default-HOME selection UI", expectedSystemPackage, device.currentPackageName)
-        candidateRadio(expectedSystemPackage)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            candidateRadio(expectedSystemPackage)
+        } else {
+            // On the API24 system image ACTION_HOME_SETTINGS routes to AdvancedAppsActivity.
+            // Read Settings' own localized preference title instead of assuming English text.
+            waitFor(By.res("android", "title").pkg(SYSTEM_SETTINGS_PACKAGE)
+                .text(legacyHomeSettingsTitle())).click()
+            legacyHomeCandidate()
+        }
         return expectedSystemPackage
+    }
+
+    private fun legacyHomeSettingsTitle(): String {
+        val resources = instrumentation.targetContext.packageManager.getResourcesForApplication(SYSTEM_SETTINGS_PACKAGE)
+        val titleId = resources.getIdentifier("home_app", "string", SYSTEM_SETTINGS_PACKAGE)
+        if (titleId == 0) failWithUi("The Nougat Settings Home app preference title resource is missing")
+        return resources.getString(titleId)
+    }
+
+    private fun legacyDialogTitleSelector(): BySelector = By.res("android", "alertTitle")
+        .pkg(SYSTEM_SETTINGS_PACKAGE).text(legacyHomeSettingsTitle())
+
+    private fun legacyHomeCandidate(): UiObject2 {
+        waitFor(legacyDialogTitleSelector())
+        // AppListPreference inflates app_preference_item with android:id/title in a framework
+        // AlertDialog ListView. It has no RadioButton; clicking a list item persists the choice.
+        val selector = By.res("android", "title").pkg(SYSTEM_SETTINGS_PACKAGE).text(ownCandidateLabel())
+            .hasAncestor(By.clazz("android.widget.ListView").pkg(SYSTEM_SETTINGS_PACKAGE))
+        waitFor(selector)
+        val candidates = device.findObjects(selector).filter { !it.visibleBounds.isEmpty }
+        if (candidates.size != 1) failWithUi("Expected one Zen candidate in the Nougat Home app dialog; found ${candidates.size}")
+        return candidates.single()
+    }
+
+    private fun waitForLegacyDialogClosed() {
+        if (!device.wait(Until.gone(legacyDialogTitleSelector()), SELECTION_TIMEOUT_MS)) {
+            failWithUi("The Nougat Home app dialog did not close")
+        }
     }
 
     private fun candidateRadio(systemPackage: String): UiObject2 {

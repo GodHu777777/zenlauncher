@@ -17,7 +17,7 @@ v2.1.4 的修复目标是：默认桌面请求能正确反映系统结果；返�
 | Robolectric API 24/28/29/34 | Activity、对话框、HOME/角色判断及设置回调 | Main 27、Manager 25、Settings 6，全部通过，无跳过 |
 | 远程 Android 设备 | 实际 Home/Back、SystemUI、锁屏 | 无真机连接；API 34 AOSP 软件模拟器中旧 APK 安装成功，但系统服务频繁 ANR/崩溃，已停止本次尝试并保留 AVD |
 | GitHub KVM / Android 7.0（API 24） | Android 标准导航、抽屉、Activity 销毁及进程终止后的 HOME 恢复 | `89561a4` 的 9 项设备测试全部通过、无跳过，进程恢复 3 项检查通过；实际授权 UI、升级及重启尚未验证 |
-| GitHub KVM / Android 14（API 34） | 相同导航及实际系统授权测试 | `7ded447` 的 11 项设备测试通过、无跳过；主机脚本的焦点读取方式不适配新版系统，进程恢复尚待复验 |
+| GitHub KVM / Android 14（API 34） | 相同导航、实际系统授权及进程终止后的恢复 | `3fb69ba` 的 11 项设备测试全部通过、无跳过，进程恢复 3 项检查通过；厂商手势、升级及重启仍未覆盖 |
 | AOSP / Pixel 真机 | 实际手势、锁屏及升级 | 待实测 |
 | 小米 / HyperOS / MIUI | 按键、全面屏手势、默认桌面入口 | 待实测，尤其关注厂商手势限制 |
 | 华为 / EMUI（支持 APK） | 默认桌面与系统导航 | 待实测 |
@@ -31,6 +31,8 @@ API 24 的通过证据来自 [CI 37116355598](https://github.com/GodHu777777/zen
 v2.1.5 首轮 [CI 37116709097](https://github.com/GodHu777777/zenlauncher/actions/runs/37116709097) 在两个 API 都进入了真实的系统选择界面，但新增两例因控件定位不匹配失败。此结果只证明测试未完成授权操作；该轮进程恢复和发布均未执行，不能计为 11 项设备测试通过，也不能据此认定应用默认桌面授权失败。
 
 [CI 37117421765](https://github.com/GodHu777777/zenlauncher/actions/runs/37117421765) 已在 API 34 通过全部 11 例，包括真实系统授权与取消。其后主机脚本在首次 HOME 焦点确认时超时：Android 14 的 `dumpsys window windows` 不包含位于显示区域状态中的 `mCurrentFocus`。修正读取方式后仍需重新执行进程终止和恢复检查，不能把该次超时直接归因于应用。API 24 的系统选择页仍未找到预期候选文字，尚待实际界面诊断。
+
+[CI 37118043822](https://github.com/GodHu777777/zenlauncher/actions/runs/37118043822) 已完成 API 34 的 11 项设备测试与 3 项进程恢复检查。API 24 的实际界面也确认：`ACTION_HOME_SETTINGS` 先打开默认应用配置页，需要点击“Home app”再打开应用列表弹窗；选择后弹窗自动关闭，取消则需分别退出弹窗和配置页。测试已按此实际流程修正，API 24 新增授权/取消两例须等待后续运行通过。
 
 用户所报告的回到原厂桌面问题，仍需具体机型、ROM 版本、触发方式及新版诊断来完成闭环。原 v2.1.3 与 v2.1.4 安装包的签名证书 SHA-256 均为 `337b92f7bda67e7c2ea553ba969e707257c3d438c3a9320c94f58b3414e7820c`。
 
